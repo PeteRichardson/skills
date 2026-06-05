@@ -1,0 +1,320 @@
+---
+name: review
+description: Comprehensive code review of a repository scope. Analyzes code across HIGH (security, memory, crashes), IDIOM (language best practices), MEDIUM (inefficiencies), and LOW (style) categories. Issues ranked by importance; all HIGH shown plus top IDIOM+MEDIUM up to 10 total. Reports saved as markdown snapshots in docs/reviews/ (not committed). Use when you want to review a folder/file, pick one issue at a time, and work through them incrementally across multiple sessions.
+---
+
+# Comprehensive Code Review
+
+Analyze a specified scope of code (folder, file, or pattern) and generate a prioritized report of issues, categorized by severity and importance. Reports are session-independent markdown snapshots, allowing you to reference issues by name and work through them incrementally.
+
+## Quick Start
+
+```
+/review src/
+```
+
+Scans all code files in `src/`, generates a report in `docs/reviews/src_YYYY-MM-DD.md`, and displays it.
+
+## Commands
+
+### Scan a scope
+```
+/review [SCOPE]
+```
+
+- **SCOPE**: folder path (`src/`), file path (`src/memory.cpp`), glob (`src/**/*.rs`)
+- **Output**: Report saved to `docs/reviews/[SCOPE]_[DATE].md`
+- **Display**: Issues printed to console, ready to work through
+
+### Focus on specific categories
+```
+/review [SCOPE] --focus [CATEGORY]
+```
+
+- `high` — Only HIGH severity issues (security, memory, crashes)
+- `idiom` — Only IDIOM issues (language best practices; great for learning)
+- `medium` — Only MEDIUM issues (inefficiencies, error handling)
+- `low` — Only LOW issues (style, naming)
+- `all` — All categories (default)
+
+**Examples:**
+```
+/review src/ --focus idiom      # Language learning sprint
+/review src/ --focus high       # Security review
+```
+
+### Refresh the report
+```
+/review [SCOPE] --refresh
+```
+
+Generates a new report with current line numbers. Use when the previous report's line numbers have drifted after several fixes.
+
+### Continue mid-session
+```
+I fixed [ISSUE NAME], what's next?
+```
+
+Marks the issue as addressed in this session and shows the next unaddressed issue from the report.
+
+**Example:**
+```
+I fixed the memory leak in Allocator, what's next?
+```
+
+### Look up a specific issue
+```
+Show me [ISSUE NAME] again
+```
+
+Retrieves the issue from the saved report and locates it in current code (handles line number drift).
+
+**Example:**
+```
+Show me the SQL injection in parse_user_id again
+```
+
+## Issue Categories & Importance
+
+### HIGH (always shown, no filtering)
+Critical issues that block shipping or break things:
+- Security vulnerabilities (SQL injection, buffer overflows, unauthorized access)
+- Memory safety (leaks, use-after-free, dangling pointers)
+- Crashes and deadlocks
+- Correctness bugs with severe impact
+
+**All HIGH issues are always reported.**
+
+### IDIOM (scored & ranked)
+Language idioms and best practices. Not idiomatic code signals knowledge gaps.
+
+**Scored on three dimensions (1–9 points total):**
+- **Interview knowledge** (1–3): 1=nice to have, 2=expected, 3=red flag if missing
+- **Code simplification** (1–3): 1=slightly cleaner, 2=notably simpler, 3=drastically reduces code
+- **Scope & impact** (1–3): 1=single site, 2=reduces bugs, 3=widespread/prevents major issues
+
+**Examples:**
+- **RAII in C++**: interview +3 (red flag if missing), simplification +2, impact +3 = **8/10**
+- **Optional chaining in Swift**: interview +1, simplification +3, impact +3 = **7/10**
+
+### MEDIUM (scored & ranked)
+Inefficiencies, error handling gaps, edge cases, maintainability issues:
+- Missing nil/error checks
+- Performance bottlenecks (O(n²) loops, N+1 queries)
+- Incomplete error handling
+- High cyclomatic complexity
+
+**Scored by scope and impact (2–6 points).**
+
+### LOW (shown if space remains)
+Style issues, naming conventions, missing comments. Lowest priority.
+
+### Reporting rule
+**All HIGH + top (10 - num_HIGH) IDIOM+MEDIUM by importance score + LOW if room**
+
+Example:
+- 5 HIGH issues → all shown (5 slots used)
+- Top 5 IDIOM+MEDIUM by score → show next 5
+- Total: 10 issues shown
+- If <5 IDIOM+MEDIUM exist, fill remainder with LOW issues
+
+## File Storage & Persistence
+
+Reports are saved as **ephemeral markdown files** (not committed to git):
+
+```
+docs/
+├── .gitignore (contains: reviews/)
+└── reviews/
+    ├── src_2025-06-04.md       (initial report)
+    ├── src_2025-06-10.md       (refreshed report)
+    └── app_2025-06-05.md       (different scope)
+```
+
+**Key points:**
+- Reports are not committed (in `.gitignore`)
+- Issues referenced by **memorable names** (e.g., "Memory leak in Allocator")
+- Allows cross-session continuation: come back days later and reference by name
+- Each date has a separate report; `/review --refresh` generates a new dated report
+
+## Workflow Example
+
+### Session 1 (Day 1)
+```
+/review src/
+```
+→ Generates `docs/reviews/src_2025-06-04.md`
+→ Reports 5 HIGH + 5 IDIOM+MEDIUM (highest scoring) + 0 LOW
+
+Pick the first issue:
+```
+Let's fix the memory leak in Allocator
+```
+→ You and Claude work through the bug together
+→ You implement and commit
+
+Continue:
+```
+I fixed that one, what's next?
+```
+→ Shows next issue (SQL injection in parse_user_id)
+
+Repeat for each issue.
+
+### Session 2 (Day 5, new session)
+Reference the old report directly:
+```
+Show me the optional chaining issue again
+```
+→ Claude reads saved report, locates issue in current code
+→ Helps you fix it
+
+```
+I fixed that one, what's next?
+```
+→ Shows next unaddressed issue
+
+After several fixes, line numbers drift:
+```
+/review src/ --refresh
+```
+→ New report: `docs/reviews/src_2025-06-10.md`
+→ Clean slate with current line numbers
+
+## Report Structure
+
+Reports are markdown with this structure:
+
+```markdown
+# Code Review: [SCOPE]
+
+**Timestamp:** YYYY-MM-DD
+**Issues found:** X HIGH • Y IDIOM • Z MEDIUM • W LOW
+**Reporting:** All HIGH + top (10 - num_HIGH) IDIOM+MEDIUM + LOW if needed
+
+## 🔴 HIGH (X issues)
+
+### 1. [Memorable issue name]
+**Location:** path/file.ext:LINE
+**Severity:** High | **Impact:** [consequence]
+**Issue:** [What's wrong]
+**Evidence:**
+\`\`\`[language]
+[Current code snippet]
+\`\`\`
+
+[... more HIGH issues ...]
+
+## 🟠 IDIOM + 🟡 MEDIUM (ranked by importance, Y of Z shown)
+
+### N. [Issue name] (IDIOM|MEDIUM) — Importance: S/10
+**Location:** path/file.ext:LINE
+**Score breakdown:**
+- Interview knowledge: +X
+- Code simplification: +X
+- Scope & impact: +X
+
+[For IDIOM: show current code AND idiomatic alternative with explanation]
+
+[... more IDIOM+MEDIUM issues ...]
+
+## Summary
+- Total files scanned: N
+- Next step: Pick one issue by name and ask "Let's fix [issue name]"
+```
+
+## When to use
+
+- **Starting a code review of a new/unfamiliar codebase** — Get a comprehensive overview of all issues
+- **Learning a language** — Focus on IDIOM issues (`--focus idiom`)
+- **Security review** — Focus on HIGH issues (`--focus high`)
+- **Picking up where you left off** — Reference issues by name from saved report
+- **Routine code quality checks** — Refresh the review (`--refresh`) after a while
+
+## Safety & Limits
+
+### File count threshold
+If the specified scope contains more than 30 code files, the skill will ask for confirmation before proceeding. This prevents accidentally scanning huge codebases.
+
+If you see this, either:
+- Narrow the scope: `/review src/foo/` instead of `/review .`
+- Use a language filter: `/review src/ --language rust`
+- Or confirm that you want to scan all files
+
+### Language detection
+Auto-detected from file extensions (`.cpp` → C++, `.py` → Python, `.rs` → Rust, etc.)
+
+If the detection is wrong, it can be adjusted in future versions with a `--language [LANG]` flag.
+
+## Implementation Details
+
+The skill works by:
+
+1. **Discovering files** in the specified scope matching code file extensions
+2. **Detecting languages** from file extensions
+3. **Checking file count** against the 30-file threshold
+4. **Reading file contents** and sending to Claude for analysis
+5. **Analyzing via Claude API** using a detailed system prompt that instructs Claude to:
+   - Identify all issues in each category (HIGH, IDIOM, MEDIUM, LOW)
+   - Score IDIOM issues on three dimensions
+   - Rank IDIOM+MEDIUM by composite importance
+   - Return structured JSON data
+6. **Generating markdown report** with ranked issues
+7. **Saving to docs/reviews/** with ephemeral status (not committed)
+8. **Managing session state** to track which issues you've fixed
+
+## Session State Management
+
+During a session, the skill maintains in-memory state of:
+- Which issues you've marked as "fixed" (via "I fixed X, what's next?")
+- The current report path and scope
+- Which issues are left to address
+
+This state is **cleared when the session ends** — it's not persistent. The saved markdown report is the persistent artifact you reference across sessions.
+
+## Making the Most of It
+
+### Learning idioms
+```
+/review src/ --focus idiom
+```
+Review only the language best practices. The three-dimension scoring helps you understand why each idiom matters.
+
+### Fast security review
+```
+/review src/ --focus high
+```
+Get straight to critical issues without noise from style or inefficiencies.
+
+### Iterative improvement
+Use the "I fixed X, what's next?" flow to work through issues one at a time. Great for:
+- Incremental refactoring
+- Learning from fixes
+- Distributed work across multiple sessions
+
+### Cross-session continuation
+Save the report path and reference issues by name days or weeks later. The skill will attempt to locate the issue in current code even if line numbers have drifted.
+
+## Limitations
+
+- **Large codebases**: Scoping to a specific folder/file is recommended for repos >1000 files
+- **Token budget**: Analyzing many files at once may exceed API limits; use `--language` or folder scoping to reduce scope
+- **Line number drift**: After many edits, old reports' line numbers become inaccurate; use `--refresh` to rescan
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "Found X files (threshold: 30)" | Reduce scope, use `--language`, or filter by file type |
+| No issues detected | Check file extensions, verify language detection in console output |
+| Can't find an old issue | Use `--refresh` to generate a new report with current line numbers |
+| Line numbers don't match | Report is stale; run `--refresh` after many edits |
+
+## Future Enhancements
+
+- `--language [LANG]` flag to override auto-detection
+- `.status.json` tracking to see which issues you've fixed over time
+- `--since COMMIT` for diff-based review of recent changes
+- `--exclude [CATEGORY]` to filter out certain issue types
+- Git hook integration for pre-commit reviews
+- Cached analysis for unchanged files
