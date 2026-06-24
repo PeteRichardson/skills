@@ -1,6 +1,6 @@
 ---
 name: update-docs
-description: Check whether documentation needs updating given recent changes, and update it if so. Use when the user types /update-docs, says "update the docs", "is the design doc current", or has just made structural changes and wants to keep documentation in sync. Invokes /gen-design-doc if an update is warranted.
+description: Check whether documentation needs updating given recent changes, and update it if so. Use when the user types /update-docs, says "update the docs", "is the design doc current", or has just made structural changes and wants to keep documentation in sync. Invokes /design-doc if an update is warranted.
 ---
 
 # Update Docs
@@ -55,7 +55,7 @@ When in doubt, briefly describe the change and ask:
 
 ## Step 3: Update design doc if needed
 
-If an update is warranted, run `/gen-design-doc`. That skill handles
+If an update is warranted, run `/design-doc`. That skill handles
 the full update cycle — reading the current doc, identifying stale
 sections, and rewriting them.
 
@@ -85,7 +85,7 @@ Close with a compact status:
 
 ```
 Design doc:  ✅ current  (no structural changes)
-             ✅ updated  (ran /gen-design-doc)
+             ✅ updated  (ran /design-doc)
              ⚠️  may need update — [reason]
 ADR index:   ✅ N decisions, last updated [date]
 ```

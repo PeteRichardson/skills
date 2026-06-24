@@ -112,7 +112,7 @@ Tests pass:   ✅ 42 passed, 0 failed
 ## Step 3: Documentation
 
 Check design doc currency against the diff (see `/update-docs` Step 2
-for the assessment logic). Don't invoke `/gen-design-doc` here — just
+for the assessment logic). Don't invoke `/design-doc` here — just
 assess and flag.
 
 ```bash

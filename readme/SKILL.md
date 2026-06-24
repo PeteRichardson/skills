@@ -432,7 +432,7 @@ After confirmation:
 
 - "Want me to stage this for your next commit?"
 - If `docs/design.md` doesn't exist: "The README covers the 'what' — want me
-  to run `/gen-design-doc` to capture the 'why' in a design doc?"
+  to run `/design-doc` to capture the 'why' in a design doc?"
 - If no `CLAUDE.md`: "Want a `CLAUDE.md` too for future Claude Code sessions?"
 - If the quickstart has no screenshot: "A demo GIF here would be the
   highest-ROI improvement — record one with `vhs` or QuickTime and I can embed it."

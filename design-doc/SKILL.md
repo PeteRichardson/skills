@@ -1,6 +1,6 @@
 ---
-name: gen-design-doc
-description: Generate or update a technical design document (docs/design.md) from an existing codebase. Use when the user types /gen-design-doc, asks to "document the architecture", "generate a design doc", "write up how this project works", "create a technical overview", or wants to capture the current state of a project as a design document. Also invoke when starting a new project and wanting to establish a living design doc, or when the design doc is stale and needs to reflect recent changes. Synthesizes code structure, README, CLAUDE.md, and existing ADRs into cohesive prose.
+name: design-doc
+description: Generate or update a technical design document (docs/design.md) from an existing codebase. Use when the user types /design-doc, asks to "document the architecture", "generate a design doc", "write up how this project works", "create a technical overview", or wants to capture the current state of a project as a design document. Also invoke when starting a new project and wanting to establish a living design doc, or when the design doc is stale and needs to reflect recent changes. Synthesizes code structure, README, CLAUDE.md, and existing ADRs into cohesive prose.
 ---
 
 # Generate Design Document
