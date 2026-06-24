@@ -1,6 +1,6 @@
 ---
-name: gen-readme
-description: Generate a README.md from an existing codebase. Use when the user types /gen-readme, asks to "write a README", "document this project", "generate a README from the code", or says the README is missing or out of date. Reads code structure, entry points, dependencies, and existing docs to produce a README with real names, real commands, and real examples — not placeholder text. Follows a prioritized feature checklist and annotates what the author still needs to supply (🖊) vs. what was auto-detected (🤖).
+name: readme
+description: Generate a README.md from an existing codebase. Use when the user types /readme, asks to "write a README", "document this project", "generate a README from the code", or says the README is missing or out of date. Reads code structure, entry points, dependencies, and existing docs to produce a README with real names, real commands, and real examples — not placeholder text. Follows a prioritized feature checklist and annotates what the author still needs to supply (🖊) vs. what was auto-detected (🤖).
 ---
 
 # Generate README
