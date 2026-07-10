@@ -1,5 +1,5 @@
 ---
-name: review
+name: code-review
 description: Comprehensive code review of a repository scope. Analyzes code across HIGH (security, memory, crashes), IDIOM (language best practices), MEDIUM (inefficiencies), and LOW (style) categories. Issues ranked by importance; all HIGH shown plus top IDIOM+MEDIUM up to 10 total. Reports saved as markdown snapshots in docs/reviews/ (not committed). Use when you want to review a folder/file, pick one issue at a time, and work through them incrementally across multiple sessions.
 ---
 
@@ -10,25 +10,25 @@ Analyze a specified scope of code (folder, file, or pattern) and generate a prio
 ## Quick Start
 
 ```
-/review src/
+/code-review src/
 ```
 
-Scans all code files in `src/`, generates a report in `docs/reviews/src_YYYY-MM-DD.md`, and displays it.
+Scans all code files in `src/`, generates a report in `docs/reviews/code-review_src_YYYY-MM-DD.md`, and displays it.
 
 ## Commands
 
 ### Scan a scope
 ```
-/review [SCOPE]
+/code-review [SCOPE]
 ```
 
 - **SCOPE**: folder path (`src/`), file path (`src/memory.cpp`), glob (`src/**/*.rs`)
-- **Output**: Report saved to `docs/reviews/[SCOPE]_[DATE].md`
+- **Output**: Report saved to `docs/reviews/code-review_[SCOPE]_[DATE].md`
 - **Display**: Issues printed to console, ready to work through
 
 ### Focus on specific categories
 ```
-/review [SCOPE] --focus [CATEGORY]
+/code-review [SCOPE] --focus [CATEGORY]
 ```
 
 - `high` — Only HIGH severity issues (security, memory, crashes)
@@ -39,13 +39,13 @@ Scans all code files in `src/`, generates a report in `docs/reviews/src_YYYY-MM-
 
 **Examples:**
 ```
-/review src/ --focus idiom      # Language learning sprint
-/review src/ --focus high       # Security review
+/code-review src/ --focus idiom      # Language learning sprint
+/code-review src/ --focus high       # Security review
 ```
 
 ### Refresh the report
 ```
-/review [SCOPE] --refresh
+/code-review [SCOPE] --refresh
 ```
 
 Generates a new report with current line numbers. Use when the previous report's line numbers have drifted after several fixes.
@@ -124,26 +124,28 @@ Reports are saved as **ephemeral markdown files** (not committed to git):
 
 ```
 docs/
-├── .gitignore (contains: reviews/)
+├── .gitignore (contains: reviews/code-review*.md)
 └── reviews/
-    ├── src_2025-06-04.md       (initial report)
-    ├── src_2025-06-10.md       (refreshed report)
-    └── app_2025-06-05.md       (different scope)
+    ├── code-review_src_2025-06-04.md   (initial report)
+    ├── code-review_src_2025-06-10.md   (refreshed report)
+    ├── code-review_app_2025-06-05.md   (different scope)
+    └── PROJECT_REVIEW.md               (from /project-review — committed, not gitignored)
 ```
 
 **Key points:**
-- Reports are not committed (in `.gitignore`)
+- Reports are not committed (`docs/reviews/code-review*.md` is gitignored) — this pattern deliberately excludes `PROJECT_REVIEW.md`, which `/project-review` writes to the same directory and which you do want committed and tracked over time
 - Issues referenced by **memorable names** (e.g., "Memory leak in Allocator")
 - Allows cross-session continuation: come back days later and reference by name
-- Each date has a separate report; `/review --refresh` generates a new dated report
+- Each date has a separate report; `/code-review --refresh` generates a new dated report
+- Frontmatter (`git_sha`, `generated_at`, `scope`) lets `/project-review` check whether findings are still current before treating them as evidence — see "Integration with /project-review" below
 
 ## Workflow Example
 
 ### Session 1 (Day 1)
 ```
-/review src/
+/code-review src/
 ```
-→ Generates `docs/reviews/src_2025-06-04.md`
+→ Generates `docs/reviews/code-review_src_2025-06-04.md`
 → Reports 5 HIGH + 5 IDIOM+MEDIUM (highest scoring) + 0 LOW
 
 Pick the first issue:
@@ -176,16 +178,22 @@ I fixed that one, what's next?
 
 After several fixes, line numbers drift:
 ```
-/review src/ --refresh
+/code-review src/ --refresh
 ```
-→ New report: `docs/reviews/src_2025-06-10.md`
+→ New report: `docs/reviews/code-review_src_2025-06-10.md`
 → Clean slate with current line numbers
 
 ## Report Structure
 
-Reports are markdown with this structure:
+Reports are markdown with a YAML frontmatter block followed by the findings:
 
 ```markdown
+---
+git_sha: a1b2c3d
+generated_at: 2026-07-10T14:32:00-07:00
+scope: src/
+---
+
 # Code Review: [SCOPE]
 
 **Timestamp:** YYYY-MM-DD
@@ -237,8 +245,8 @@ Reports are markdown with this structure:
 If the specified scope contains more than 30 code files, the skill will ask for confirmation before proceeding. This prevents accidentally scanning huge codebases.
 
 If you see this, either:
-- Narrow the scope: `/review src/foo/` instead of `/review .`
-- Use a language filter: `/review src/ --language rust`
+- Narrow the scope: `/code-review src/foo/` instead of `/code-review .`
+- Use a language filter: `/code-review src/ --language rust`
 - Or confirm that you want to scan all files
 
 ### Language detection
@@ -259,7 +267,7 @@ The skill works by:
    - Score IDIOM issues on three dimensions
    - Rank IDIOM+MEDIUM by composite importance
    - Return structured JSON data
-6. **Generating markdown report** with ranked issues
+6. **Generating markdown report** with ranked issues, prefixed with a frontmatter block recording `git_sha` (`git rev-parse HEAD`), `generated_at` (current timestamp), and `scope` (the SCOPE argument) — this lets `/project-review` check per-file staleness later
 7. **Saving to docs/reviews/** with ephemeral status (not committed)
 8. **Managing session state** to track which issues you've fixed
 
@@ -276,13 +284,13 @@ This state is **cleared when the session ends** — it's not persistent. The sav
 
 ### Learning idioms
 ```
-/review src/ --focus idiom
+/code-review src/ --focus idiom
 ```
 Review only the language best practices. The three-dimension scoring helps you understand why each idiom matters.
 
 ### Fast security review
 ```
-/review src/ --focus high
+/code-review src/ --focus high
 ```
 Get straight to critical issues without noise from style or inefficiencies.
 
@@ -294,6 +302,14 @@ Use the "I fixed X, what's next?" flow to work through issues one at a time. Gre
 
 ### Cross-session continuation
 Save the report path and reference issues by name days or weeks later. The skill will attempt to locate the issue in current code even if line numbers have drifted.
+
+## Integration with `/project-review`
+
+`/code-review` is the tactical, line-level counterpart to `/project-review` (whole-repo, architectural). Run `/project-review` first on an unfamiliar or newly inherited repo to find where debt concentrates; then run `/code-review` on the specific files or folders it flags for the line-by-line grind.
+
+`/project-review` reads saved `/code-review` reports as evidence — a pattern recurring across 3+ files gets rolled up into one architectural finding there — but never copies individual line items into its own output. The `git_sha`/`generated_at`/`scope` frontmatter above is what makes that possible: `/project-review` diffs each cited file against that commit to decide whether a finding is still valid before using it. Reports with no frontmatter, or where the cited file has changed since, are treated as stale and skipped rather than guessed at.
+
+Keeping the frontmatter accurate is the only thing this skill needs to do to support that integration — no other behavior changes.
 
 ## Limitations
 
