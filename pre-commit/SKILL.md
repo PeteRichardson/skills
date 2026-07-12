@@ -127,21 +127,7 @@ Design doc:   ✅ current
 
 ---
 
-## Step 4: Decision capture
-
-Ask once:
-
-> Did this change involve any significant decisions worth capturing
-> as an ADR? (yes / no)
-
-```
-Decisions:    ✅ none to capture
-              📝 run /capture-decision before or after committing
-```
-
----
-
-## Step 5: Pop stash (if stashed in Step 0)
+## Step 4: Pop stash (if stashed in Step 0)
 
 If unstaged changes were stashed in Step 0, pop now regardless of
 check results:
@@ -154,7 +140,7 @@ Confirm success. If conflict, prompt manual recovery (see Step 0).
 
 ---
 
-## Step 6: Summary
+## Step 5: Summary
 
 Print the gate:
 
@@ -164,7 +150,6 @@ Pre-commit verification
 Tests exist:   ✅
 Tests pass:    ✅
 Design doc:    ✅
-Decisions:     ✅
 ───────────────────────
 ✅ All clear — run /commit-message
 ```
@@ -177,7 +162,6 @@ Pre-commit verification
 Tests exist:   ⚠️  missing for: lexer.rs → /add-tests
 Tests pass:    ❌  4 failing → /run-tests
 Design doc:    ✅
-Decisions:     ✅
 ───────────────────────
 ⚠️  Address flagged items, then re-run /pre-commit
 ```
@@ -190,7 +174,6 @@ pass a check that failed.
 ## What not to do
 
 - Don't fix anything — name the skill that fixes it
-- Don't write tests, update docs, or capture decisions inline
+- Don't write tests or update docs inline
 - Don't run `/commit-message` automatically — the user runs it
-- Don't block on the decisions question if the user already answered
 - Don't forget to pop the stash — always pop, even if checks fail

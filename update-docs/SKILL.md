@@ -5,9 +5,9 @@ description: Check whether documentation needs updating given recent changes, an
 
 # Update Docs
 
-Assess whether the design doc and ADR index are current given recent
-changes. Update what needs updating; confirm what doesn't. Don't update
-docs that don't need it.
+Assess whether the design doc is current given recent changes. Update
+what needs updating; confirm what doesn't. Don't update docs that don't
+need it.
 
 ---
 
@@ -64,22 +64,7 @@ If no update is needed, say so briefly:
 
 ---
 
-## Step 4: Check ADR index
-
-```bash
-ls docs/decisions/ 2>/dev/null
-cat docs/decisions/README.md 2>/dev/null
-git log --oneline -3 -- docs/decisions/
-```
-
-Note the most recent ADR and its date. Don't prompt for a new ADR here —
-that's `/capture-decision`'s job. Just report status:
-
-> ADRs: last recorded [date] — [slug]. N decisions total.
-
----
-
-## Step 5: Report
+## Step 4: Report
 
 Close with a compact status:
 
@@ -87,7 +72,6 @@ Close with a compact status:
 Design doc:  ✅ current  (no structural changes)
              ✅ updated  (ran /design-doc)
              ⚠️  may need update — [reason]
-ADR index:   ✅ N decisions, last updated [date]
 ```
 
 ---
@@ -96,6 +80,5 @@ ADR index:   ✅ N decisions, last updated [date]
 
 - Don't update the design doc for non-structural changes — churn is worse
   than staleness for minor changes
-- Don't write ADRs — that's `/capture-decision`
 - Don't modify source code
 - Don't update docs that are already current

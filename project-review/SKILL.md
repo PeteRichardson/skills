@@ -21,9 +21,9 @@ disable-model-invocation: false
 
 # Project Review
 
-A Claude Code skill that conducts a deliberate, opinionated audit of an entire codebase and produces `docs/reviews/PROJECT_REVIEW.md` with cited findings.
+A skill that conducts a deliberate, opinionated audit of an entire codebase and produces `docs/reviews/PROJECT_REVIEW.md` with cited findings.
 
-When invoked via `/project-review`, follow the protocol below. Everything from here through the `---` divider is the protocol Claude executes. The section after the divider is documentation for humans installing or maintaining this skill.
+When invoked via `/project-review`, follow the protocol below. Everything from here through the `---` divider is the protocol to execute. The section after the divider is documentation for humans installing or maintaining this skill.
 
 ---
 
@@ -42,7 +42,7 @@ Do not skip this. Forming opinions before understanding the system produces bad 
 3. Run `git log --oneline -200` and `git log --stat --since="6 months ago"` to see what's actually changing and where churn concentrates.
 4. Identify entry points, hot paths, and cold corners.
 5. List the top 20 largest files by line count, and the 20 files most frequently modified in the last 6 months. The intersection is where debt usually hides.
-6. Use `TodoWrite` to publish a plan so the user can see progress through the phases.
+6. Publish a plan using your environment's task-tracking mechanism (e.g. a todo/plan list) so the user can see progress through the phases.
 
 Write a 1–2 paragraph mental model of the architecture before proceeding. If your model contradicts the README, flag it — that itself is a finding.
 
@@ -111,9 +111,11 @@ If a tool isn't installed, note it in the audit and move on rather than blocking
 
 ## Large repos: spawn subagents
 
-If the repo is >50k LOC or has >5 top-level modules, dispatch subagents (Task tool) in parallel — one per module — and synthesize their reports. Serial reading on a large repo eats the context window before findings can be written.
+If the repo is >50k LOC or has >5 top-level modules, and your environment supports dispatching parallel subagents, spawn one per module and synthesize their reports. Serial reading on a large repo eats the context window before findings can be written.
 
 Each subagent gets: scope (one module), the dimensions list above, the citation requirement, and a 200-finding cap. The main agent merges, dedupes, and ranks.
+
+If parallel subagent dispatch isn't available, read serially but prioritize the highest-signal areas first (largest files, highest-churn files from Phase 1) so the audit still produces cited findings within the context budget.
 
 ## Repeat-run mode
 
@@ -127,7 +129,7 @@ Everything below is for humans installing, using, or contributing to this skill.
 
 ## Installation
 
-Personal install (available across all your projects — recommended, since this is meant to run on any repo you inherit or resurrect):
+Personal install (available across all your projects — recommended, since this is meant to run on any repo you inherit or resurrect). Use your agent CLI's global skills directory, e.g. `~/.claude/skills` for Claude Code or `~/.codex/skills` for Codex:
 
 ```bash
 mkdir -p ~/.claude/skills/project-review
@@ -141,7 +143,7 @@ mkdir -p .claude/skills/project-review
 cp /path/to/this/SKILL.md .claude/skills/project-review/SKILL.md
 ```
 
-Verify it loaded:
+Verify it loaded — the check is CLI-specific, e.g. for Claude Code:
 
 ```bash
 echo "/skills" | claude
@@ -149,7 +151,7 @@ echo "/skills" | claude
 
 ## Usage
 
-In Claude Code, in the repo you want audited:
+In your agent CLI, in the repo you want audited:
 
 ```
 /project-review
@@ -195,7 +197,7 @@ The skill also explicitly forbids recommending rewrites and forbids padding cate
 
 ## Adaptation notes
 
-**Project-level overrides.** A `.claude/skills/project-review/SKILL.md` in a specific repo overrides the global one. Useful for a repo that needs still-more-custom dimensions on top of these.
+**Project-level overrides.** A `.claude/skills/project-review/SKILL.md` (or your agent CLI's equivalent project-local skills path) in a specific repo overrides the global one. Useful for a repo that needs still-more-custom dimensions on top of these.
 
 **Mid-audit course correction.** After Phase 1 completes, you can interrupt with: *"Before Phase 2, tell me what surprised you in Phase 1 and what you want to investigate that isn't in the dimensions list."*
 

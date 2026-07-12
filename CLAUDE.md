@@ -15,9 +15,9 @@ Frontmatter fields used across this repo:
 - `name`: matches the directory name (kebab-case). The slash command is `/<name>`.
 - `description`: doubles as the invocation trigger — it must spell out the slash command and the natural-language phrases that should activate the skill ("Use when the user types /X, says '...'").
 - `disable-model-invocation: true`: user-invoked only; Claude won't auto-trigger it (e.g. `project-review`).
-- `user-invocable: false` + `disable-model-invocation: true`: background knowledge skills that are only referenced by other skills, never invoked directly (`adr-template`, `adr-best-practices`).
+- `user-invocable: false` + `disable-model-invocation: true`: background knowledge skills that are only referenced by other skills, never invoked directly.
 
-Skills compose by referencing each other by slash command or name rather than duplicating logic: `pre-commit` reuses `/run-tests` detection logic, `update-docs` delegates to `/design-doc`, `capture-decision` builds on `adr-template` and `adr-best-practices`. When changing a skill, grep the other `SKILL.md` files for its name to find dependents — renames must update those references.
+Skills compose by referencing each other by slash command or name rather than duplicating logic: `pre-commit` reuses `/run-tests` detection logic, `update-docs` delegates to `/design-doc`. When changing a skill, grep the other `SKILL.md` files for its name to find dependents — renames must update those references.
 
 Structural patterns to preserve when editing:
 

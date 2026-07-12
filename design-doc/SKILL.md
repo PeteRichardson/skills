@@ -1,6 +1,6 @@
 ---
 name: design-doc
-description: Generate or update a technical design document (docs/design.md) from an existing codebase. Use when the user types /design-doc, asks to "document the architecture", "generate a design doc", "write up how this project works", "create a technical overview", or wants to capture the current state of a project as a design document. Also invoke when starting a new project and wanting to establish a living design doc, or when the design doc is stale and needs to reflect recent changes. Synthesizes code structure, README, CLAUDE.md, and existing ADRs into cohesive prose.
+description: Generate or update a technical design document (docs/design.md) from an existing codebase. Use when the user types /design-doc, asks to "document the architecture", "generate a design doc", "write up how this project works", "create a technical overview", or wants to capture the current state of a project as a design document. Also invoke when starting a new project and wanting to establish a living design doc, or when the design doc is stale and needs to reflect recent changes. Synthesizes code structure, README, and CLAUDE.md into cohesive prose.
 ---
 
 # Generate Design Document
@@ -67,15 +67,6 @@ cat requirements.txt 2>/dev/null # Python
 cat go.mod 2>/dev/null           # Go
 cat *.podspec 2>/dev/null        # CocoaPods
 ```
-
-### 1e. Existing ADRs
-```bash
-ls docs/decisions/ 2>/dev/null
-cat docs/decisions/README.md 2>/dev/null
-```
-
-If ADRs exist, read each one. They contain *why* decisions were made —
-that context belongs in the design doc, not just the outcome.
 
 ---
 
@@ -157,13 +148,12 @@ This is often the most useful section for understanding a system.]
 
 ## Key Design Decisions
 
-[This section synthesizes the ADRs into a coherent narrative.
-For each significant decision, explain:
+[For each significant decision evident from the code or commit history,
+explain:
 - The context that made it a real decision
-- What was chosen and why
-- The trade-off acknowledged
-
-Link to the relevant ADR for full detail: see [ADR-0001](decisions/0001-slug.md)]
+- What was chosen and why (infer from code comments, commit messages,
+  or structure — don't invent)
+- The trade-off, if apparent]
 
 ---
 
@@ -228,11 +218,6 @@ The design doc's job is to explain the choices behind the structure.
 the current approach has limitations, say so in Open Questions. A design
 doc that pretends everything is perfect loses credibility.
 
-**Incorporate ADR rationale.** Don't just list that decisions were made —
-weave the reasoning into the narrative where it explains the architecture.
-Reference the ADR for full detail, but the design doc should be readable
-without reading every ADR.
-
 **Scale to the codebase.** A 500-line script needs a shorter design doc
 than a 50-file system. Don't pad; don't truncate important context.
 Typical length: 400–1000 words of prose.
@@ -245,7 +230,7 @@ as an open question rather than guessing.
 ## Step 4: Create the docs directory if needed
 
 ```bash
-mkdir -p docs/decisions   # also creates docs/
+mkdir -p docs
 ```
 
 Write the file to `docs/design.md`.
@@ -258,7 +243,6 @@ Tell the developer:
 1. The path written
 2. Which sections were generated vs. updated (if updating existing doc)
 3. Any open questions you flagged that they should answer
-4. Whether any ADRs were incorporated and which ones
 
 Then ask: **"Does this capture the project accurately? Anything
 missing or incorrect?"**
@@ -272,9 +256,6 @@ If they want revisions, edit in place.
 After confirmation, offer:
 
 - "Want me to stage this for your next commit?"
-- If no ADRs exist yet: "This project has no ADRs yet. Want to run
-  `/capture-decision` to start capturing the decisions behind some of
-  these design choices?"
 - If the README seems thin relative to the design doc: "The README
   looks light compared to what's in the design doc — want me to
   update it too?"
@@ -285,7 +266,7 @@ After confirmation, offer:
 
 - Don't list every file and function — that's not a design doc, that's
   an index
-- Don't invent architectural decisions not visible in the code or ADRs
+- Don't invent architectural decisions not visible in the code
 - Don't write a generic template with placeholder text — every section
   should reflect this specific codebase
 - Don't make the document longer than it needs to be
