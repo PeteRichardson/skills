@@ -25,9 +25,10 @@ This directory contains the `onote` skill for summarizing Claude sessions into O
    /onote create two separate notes for hardware and software
    ```
 
-3. **I'll generate a `.md` file** saved to `/mnt/user-data/outputs/`
+3. **I'll generate a `.md` file** and save it directly to your vault:
+   `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/technical/`
 
-4. **Download and import into Obsidian** — Edit as needed
+4. **Open it in Obsidian** — Edit as needed
 
 ## Key Concepts
 
@@ -69,12 +70,11 @@ Use `/onote` modifiers to tune the output:
 
 Onote fits into a learning loop:
 
-1. **Have a learning session** with Claude (ask questions, explore trade-offs, solve problems)
-2. **Generate a note** with `/onote` while context is fresh
-3. **Download & import** into Obsidian
-4. **Review & refine** (edit tags, reorganize if needed)
-5. **Link related notes** using Obsidian's linking
-6. **Revisit later** — bump `status: raw` → `refined` if still accurate
+1. **Have a learning session** (ask questions, explore trade-offs, solve problems)
+2. **Generate a note** with `/onote` while context is fresh — saved straight to your vault
+3. **Review & refine** (edit tags, reorganize if needed)
+4. **Link related notes** using Obsidian's linking
+5. **Revisit later** — bump `status: raw` → `refined` if still accurate
 
 ## For More Information
 
@@ -84,7 +84,6 @@ Onote fits into a learning loop:
 
 ## Future Enhancements
 
-- Direct Obsidian vault integration (auto-insert without manual download)
 - Automatic inter-note linking
 - Bulk note operations (merge, split, retag)
 - Confidence evolution tracking over time

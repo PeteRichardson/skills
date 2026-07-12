@@ -109,14 +109,12 @@ rust-async-patterns-2025-06-05-v2.md```
 
 ## What Happens Next: Workflow
 
-1. **I generate the .md file** → saved to `/mnt/user-data/outputs/`
-2. **You download it** from the chat interface
-3. **Import it into Obsidian** manually or via your favorite sync method
-4. **Review & refine** — Edit tags, move to folders, refactor if needed
-5. **Link related notes** — Use Obsidian's linking UI to cross-reference
-6. **Revisit later** — Bump `status: raw` → `status: refined` if it holds up
+1. **I generate the .md file** → saved directly to `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/technical/`
+2. **Review & refine** — Edit tags, move to folders, refactor if needed
+3. **Link related notes** — Use Obsidian's linking UI to cross-reference
+4. **Revisit later** — Bump `status: raw` → `status: refined` if it holds up
 
-I'm **not** inserting notes directly into your vault (yet). You maintain control over organization and curation.
+Notes are written straight into your vault — no manual download or copy step needed. You still have full control to edit, move, or delete them afterward.
 
 ---
 
@@ -204,13 +202,12 @@ where contains(tags, "rust") AND confidence = "high"```
 
 ## Future Enhancements (Planned, Not Yet Implemented)
 
-- 🔮 Direct Obsidian vault integration via MCP (auto-insert without manual download)
 - 🔮 Automatic linking between related notes
 - 🔮 Bulk note operations (merge, split, re-tag) via Obsidian plugin
 - 🔮 Confidence evolution tracking (see how certainty changed over time)
 - 🔮 Note template generation (create your own custom onote format)
 
-For now, use the manual workflow above. As the skill matures, these conveniences will arrive.
+As the skill matures, these conveniences will arrive.
 
 ---
 
@@ -218,17 +215,13 @@ For now, use the manual workflow above. As the skill matures, these conveniences
 
 
 ```bash
-# If you want to manually create an onote file in your vault:
-
-# Copy the downloaded note:
-cp ~/Downloads/{Topic}-{YYYY-MM-DD}.md ~/Obsidian/Notes/
-
-# Sync to your vault (if using iCloud Drive, Syncthing, etc.):
-# Just let your sync tool handle it; Obsidian detects the new file automatically
+# Onote writes directly to the vault, so no manual copy step is needed. Obsidian
+# (via iCloud Drive sync) picks up the new file automatically.
 
 # To delete an onote:
-rm ~/Obsidian/Notes/{Topic}-{YYYY-MM-DD}.md
-# Obsidian will remove it from the vault automatically```
+rm "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/technical/{Topic}-{YYYY-MM-DD}.md"
+# Obsidian will remove it from the vault automatically
+```
 
 ---
 

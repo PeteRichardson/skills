@@ -32,7 +32,7 @@ Or describe what aspect of the session to capture:
 1. Analyze the full conversation for context, questions asked, and answers given
 2. Extract 3–5 significant learnings (applying explicit criteria)
 3. Organize findings into a structured markdown file with YAML frontmatter
-4. Save the file to `/mnt/user-data/outputs/` ready for Obsidian import
+4. Save the file directly to the vault: `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/technical/`
 5. Suggest related notes if the session spans multiple domains
 
 ---
@@ -221,7 +221,7 @@ When you invoke `/onote`, Claude will:
 5. **Capture decisions** — What did you choose and why? What did you reject?
 6. **Flag confidence** — Is this confirmed or provisional?
 7. **List next steps** — What do you need to do next to validate or act on this?
-8. **Create the .md file** — Write it to `/mnt/user-data/outputs/` with a sensible filename
+8. **Create the .md file** — Write it directly to `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/technical/` with a sensible filename
 
 ---
 
