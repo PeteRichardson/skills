@@ -143,6 +143,10 @@ prs:
 
 If a file matching the current invocation's scope already exists in `.claude/tmp/pr-triage/` (`PR_TRIAGE.md` for a full run, `PR_TRIAGE-<numbers>.md` for a scoped run), read it first. Mark PRs no longer open as `MERGED` or `CLOSED`, re-rank the remaining queue against the current base, and note which recommendations changed since the last run and why (usually: a merge happened, or a PR was updated). A full-queue run and a scoped run are tracked separately — don't treat one as a substitute for the other's history.
 
+**Full-queue repeat runs** (`PR_TRIAGE.md`) always re-run Phase 1 in full — re-enumerate every currently-open PR rather than trusting the existing file's `prs` array, since a critical PR opened after the last run must not stay invisible until the next fresh (non-repeat) triage. Any PR Phase 1 returns that isn't already in the file's `prs` array is new: give it the full Phase 2–4 treatment (diff, overlap, severity check). For a PR already in `prs`, compare its live `updatedAt` (from this same Phase 1 call) against the file's own frontmatter `generated` timestamp — if `updatedAt` is not later than `generated`, nothing about that PR has changed since this snapshot was written, so skip re-diffing it in Phase 2/4 and reuse its last-known overlap and severity classification. Cost scales with the number of genuinely new or since-updated PRs, not the full queue.
+
+**Scoped repeat runs** (`PR_TRIAGE-<numbers>.md`) stay locked to the PR numbers already in the file's `prs` array — this mode exists specifically so the user can burn down a chosen subset without new PRs jumping the queue. Don't re-enumerate beyond those numbers.
+
 ---
 
 # Project documentation
