@@ -23,9 +23,9 @@ This tells you *that* something changed but not *what*. Reading the actual outst
 ## Goals
 
 - Show, per snapshot file, the outstanding PRs (number + title) in recommended merge order, and the merged/closed PRs in reverse-chronological order — always, no flag needed (queues here run in the 10–20 PR range, not hundreds).
-- Distinguish critical vs. non-critical vs. merged/closed visually via color.
+- Distinguish critical vs. non-critical vs. merged/closed via a plain-text marker (no color — see Non-goals).
 - Preserve visibility into "this one used to be critical" even after it merges.
-- Make the filename and each PR line clickable where the terminal supports it (OSC 8 hyperlinks), without breaking terminals that don't.
+- Print the filename as a plain absolute path and each PR line's URL as plain text, so terminals with path/URL auto-detection (iTerm2 semantic history, etc.) can still make them clickable, without depending on OSC 8 support.
 - Keep `list`'s single-`gh`-call-per-invocation principle intact.
 - Full-queue repeat runs must surface newly-opened critical PRs, not just reconcile the PRs already in the snapshot.
 
@@ -34,7 +34,7 @@ This tells you *that* something changed but not *what*. Reading the actual outst
 - The `view` subcommand (separate, future item).
 - Renaming `clean` to `prune` (separate, future item — flagged as an observation below, not part of this change).
 - A `--all` / filtering flag — dropped in favor of always showing everything, since the queue size doesn't warrant hiding anything.
-- Terminal color/hyperlink fallback logic — OSC 8 and ANSI color codes degrade gracefully in terminals that don't support them (plain text renders), so no conditional branching is needed.
+- ANSI color codes and OSC 8 hyperlinks in `list`'s output — tested directly (2026-07-20) and dropped. `list`'s output is assistant response text, and raw escape sequences in response text render as literal garbage regardless of terminal (Claude Code sanitizes model-generated text so it can't inject terminal control codes). Routing the output through a Bash call instead does render escape codes correctly in a real terminal, but Claude Code's TUI collapses Bash tool output to a one-line summary by default, and reaching the expanded view requires the user to press Ctrl+O — a toggle that resets on every subsequent tool call and cannot be forced open at generation time. That per-invocation manual step is worse than just not styling the output.
 
 ## Design
 
@@ -62,23 +62,23 @@ There is exactly one existing report file using the old flat-array format; the u
 ### `list` output format
 
 ```
-PR_TRIAGE-7-8.md  (generated 2026-07-18 14:32)
-    #8  Add rate limiting to /api/upload
-    #7  Fix login redirect loop
+PR_TRIAGE-7-8.md  (generated 2026-07-18 14:32)  /Users/pete/project/.claude/tmp/pr-triage/PR_TRIAGE-7-8.md
+    #8  ‼ Add rate limiting to /api/upload       https://github.com/org/repo/pull/8
+    #7    Fix login redirect loop                https://github.com/org/repo/pull/7
     ---
-    #5  ‼ Fix data loss on export bug          merged 2026-07-19
-    #9  Old experimental sync flag              closed 2026-07-16
-    #3  Add CSV export                          merged 2026-07-15
+    #5  ‼ Fix data loss on export bug            merged 2026-07-19  https://github.com/org/repo/pull/5
+    #9    Old experimental sync flag             closed 2026-07-16  https://github.com/org/repo/pull/9
+    #3    Add CSV export                         merged 2026-07-15  https://github.com/org/repo/pull/3
 ```
 
-- Filename is an OSC 8 hyperlink to `file://<absolute-path>`, so terminals that support it (iTerm2, WezTerm, Kitty, etc.) can open it directly in the system default `.md` viewer. The per-file count summary (`2 PRs, 0 critical, ...`) is removed; the generation timestamp (from frontmatter `generated`) takes its place on the same line, since the PR list below already conveys the counts at a glance.
+- Filename line is followed by the plain absolute path to the file, so terminals with path auto-detection (iTerm2 semantic history, etc.) can still open it directly — no OSC 8 involved (see Non-goals). The per-file count summary (`2 PRs, 0 critical, ...`) is removed; the generation timestamp (from frontmatter `generated`) takes its place on the same line, since the PR list below already conveys the counts at a glance.
 - Below the filename, two groups, always both shown in full (no `--all` flag):
-  - **Outstanding**, in recommended order (frontmatter array order for entries not yet merged/closed). Critical → red. Non-critical → yellow.
+  - **Outstanding**, in recommended order (frontmatter array order for entries not yet merged/closed). Prefixed with `‼` if the entry's frontmatter `critical` flag is `true`; unmarked otherwise (no color — see Non-goals).
   - A `---` separator line.
-  - **Merged/closed**, in reverse-chronological order (most recent first), sorted by `mergedAt` for state `MERGED` and `closedAt` for state `CLOSED`. Always grey. Prefixed with `‼` if the entry's frontmatter `critical` flag is `true` — so a critical fix landing doesn't just disappear into grey.
+  - **Merged/closed**, in reverse-chronological order (most recent first), sorted by `mergedAt` for state `MERGED` and `closedAt` for state `CLOSED`. Same `‼` marker convention as the outstanding group, so a PR that was critical doesn't lose that signal once it resolves.
   - Each line shows its resolution: `merged <date>` or `closed <date>` (GitHub's `state` field distinguishes these — `CLOSED` is "abandoned without merging," not a synonym for merged, so the current skill's practice of lumping both into one "merged" count is being corrected here).
-  - If `prs` is empty, print just the filename/timestamp line — no separator, no stray group headers.
-- Each `#N Title` line is itself an OSC 8 hyperlink to the PR's GitHub URL.
+  - If `prs` is empty, print just the filename/timestamp/path line — no separator, no stray group headers.
+- Each `#N Title` line ends with the PR's plain GitHub URL as text, relying on the same terminal auto-detection as the file path — no OSC 8.
 - Sort order of files (which file's block comes first) is unchanged: newest-generated first, from frontmatter `generated`.
 
 ### `gh` call changes
@@ -95,4 +95,4 @@ Today, repeat-run reconciles only the PRs already present in the snapshot file. 
 ## Observations for future work (not part of this change)
 
 - `clean` is really pruning whole files (delete snapshots whose entire PR set has resolved). A future rename to `prune` would make the file-level operation's name distinct from any entry-level cleanup, avoiding the confusion that came up while designing this feature. Deferred — orthogonal to `list`'s output.
-- `view` (open the most-recent snapshot in the system default `.md` viewer) remains unimplemented; the OSC 8 filename hyperlink added here covers part of that need for terminals that support it, but `view` is still a separate future subcommand.
+- `view` (open the most-recent snapshot in the system default `.md` viewer) remains unimplemented; the plain absolute path added to `list`'s filename line covers part of that need for terminals with path auto-detection, but `view` is still a separate future subcommand.
