@@ -1,6 +1,6 @@
 ---
 name: pr-triage
-description: Assess and rank a set of open PRs to determine the merge order that minimizes total rebase/conflict work. Produces a scoped snapshot under .claude/tmp/pr-triage/ with a file-overlap matrix, blast-radius ranking, semantic overlap judgment for colliding PRs, and a recommended merge sequence. Supports `/pr-triage list` (with per-file status: PR count, critical count, merged vs. outstanding), `/pr-triage open`, and `/pr-triage clean` [--all] to find and tidy up past runs. Use when the user has multiple open PRs (especially several based on the same commit) and asks which to merge first, how to order PRs, or to triage/prioritize the PR queue. Does not merge, push, or modify anything — advisory only.
+description: Assess and rank a set of open PRs to determine the merge order that minimizes total rebase/conflict work. Produces a scoped snapshot under .claude/tmp/pr-triage/ with a file-overlap matrix, blast-radius ranking, semantic overlap judgment for colliding PRs, and a recommended merge sequence. Supports `/pr-triage list` (per-file breakdown of outstanding vs. merged/closed PRs, each with title and link), `/pr-triage open`, and `/pr-triage clean` [--all] to find and tidy up past runs. Use when the user has multiple open PRs (especially several based on the same commit) and asks which to merge first, how to order PRs, or to triage/prioritize the PR queue. Does not merge, push, or modify anything — advisory only.
 disable-model-invocation: true
 ---
 
@@ -198,11 +198,16 @@ Find or open past runs without digging through `.claude/` by hand:
 /pr-triage open
 ```
 
-`list` shows each snapshot's status at a glance — PR count, critical-override count, and how many of its PRs have since merged vs. are still outstanding:
+`list` shows each snapshot's outstanding and merged/closed PRs at a glance — title, critical marker, and link — without opening the file:
 
 ```
-PR_TRIAGE-7-8-12.md   3 PRs, 1 critical, 1 merged, 2 outstanding [#7, #8]
-PR_TRIAGE.md          5 PRs, 0 critical, 3 merged, 2 outstanding [#9, #14]
+PR_TRIAGE-7-8.md  (generated 2026-07-18 14:32)  /Users/pete/project/.claude/tmp/pr-triage/PR_TRIAGE-7-8.md
+    #8  ‼ Add rate limiting to /api/upload       https://github.com/org/repo/pull/8
+    #7    Fix login redirect loop                https://github.com/org/repo/pull/7
+    ---
+    #5  ‼ Fix data loss on export bug            merged 2026-07-19  https://github.com/org/repo/pull/5
+    #9    Old experimental sync flag             closed 2026-07-16  https://github.com/org/repo/pull/9
+    #3    Add CSV export                         merged 2026-07-15  https://github.com/org/repo/pull/3
 ```
 
 `open` opens the folder in Finder (macOS). This exists specifically so you don't have to remember the skill name or go spelunking through `.claude/tmp/` the way you'd hunt for an Xcode build product in DerivedData.
