@@ -1,6 +1,6 @@
 ---
 name: pr-triage
-description: Assess and rank a set of open PRs to determine the merge order that minimizes total rebase/conflict work. Produces PR_TRIAGE.md with a file-overlap matrix, blast-radius ranking, semantic overlap judgment for colliding PRs, and a recommended merge sequence. Use when the user has multiple open PRs (especially several based on the same commit) and asks which to merge first, how to order PRs, or to triage/prioritize the PR queue. Does not merge, push, or modify anything — advisory only.
+description: Assess and rank a set of open PRs to determine the merge order that minimizes total rebase/conflict work. Produces a scoped snapshot under .claude/tmp/pr-triage/ with a file-overlap matrix, blast-radius ranking, semantic overlap judgment for colliding PRs, and a recommended merge sequence. Supports `/pr-triage list` (with per-file status: PR count, critical count, merged vs. outstanding), `/pr-triage open`, and `/pr-triage clean` [--all] to find and tidy up past runs. Use when the user has multiple open PRs (especially several based on the same commit) and asks which to merge first, how to order PRs, or to triage/prioritize the PR queue. Does not merge, push, or modify anything — advisory only.
 disable-model-invocation: true
 ---
 
@@ -17,6 +17,26 @@ When invoked via `/pr-triage`, follow the protocol below. Everything from here t
 The goal is total rework across the whole queue, not the easiest next merge. A "small" PR that touches a hot shared file can cost more than a "big" PR that touches nothing anyone else does. Rank by blast radius (how many other open PRs would need to rebase if this one merges first), not by size or complexity alone.
 
 This skill is advisory. It never merges, pushes, force-pushes, or resolves conflicts on its own — it produces a ranked recommendation and reasoning, and the user decides.
+
+Output is invalidated by the next merge event in the queue — it is not a durable artifact and must never be committed. It's written under `.claude/tmp/pr-triage/`, this project's shared scratch convention for ephemeral skill output, namespaced per-skill so multiple skills' scratch files don't collide or get mistaken for one another (see Phase 5). It persists on disk across sessions for Repeat-run mode, just never enters version control.
+
+## Phase 0: Subcommands
+
+Check the invocation before doing anything else:
+
+* **`/pr-triage list`** — for every file in `.claude/tmp/pr-triage/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`prs`, `critical`, `generated`) rather than the full report. Then make **one** `gh pr list --state all --json number,state` call covering the union of every `prs` array across all files, and classify each file's PRs as merged/closed vs still open against that single result — don't make a separate API call per file. Report each file as:
+
+  ```
+  PR_TRIAGE-7-8-12.md   3 PRs, 1 critical, 1 merged, 2 outstanding [#7, #8]
+  PR_TRIAGE.md          5 PRs, 0 critical, 3 merged, 2 outstanding [#9, #14]
+  ```
+
+  Sort newest-generated first (from the frontmatter `generated` timestamp, not file mtime — mtime can be misleading if files are ever copied or touched). If a file has no frontmatter (e.g. hand-edited or from an older version of this skill), fall back to filename and last-modified time only, and note it's missing status. Stop here; don't run a triage.
+* **`/pr-triage open`** — run `open .claude/tmp/pr-triage/` (macOS). If `open` isn't available, fall back to printing the absolute path. Stop here; don't run a triage.
+* **`/pr-triage clean`** — read every file's frontmatter for its `prs` list, then make one `gh pr list --state all --json number,state` call covering the union (same approach as `list`) rather than one call per file. Any file whose entire `prs` set is now merged or closed is a candidate for removal — there's no Repeat-run continuity value left in a snapshot whose whole queue has resolved. Show the candidate list plus, separately, what's being kept and why (any file referencing at least one still-open PR), and ask for confirmation before deleting. Stop here; don't run a triage.
+* **`/pr-triage clean --all`** — unconditional wipe of everything in `.claude/tmp/pr-triage/`, regardless of PR state. Show what will be deleted and ask for confirmation first. Stop here; don't run a triage.
+* **`/pr-triage`** (no args) — full-queue run, proceed to Phase 1.
+* **`/pr-triage #7 #8 #12`** (PR numbers) — scoped run limited to those PRs, proceed to Phase 1 with the scope noted.
 
 ## Phase 1: Enumerate the queue
 
@@ -44,6 +64,18 @@ Tiebreakers, in order, when blast radius is equal:
 1. **Staleness** — days since `updatedAt`. Older/less-active PRs go earlier: drift compounds whether or not anyone's watching it, so surface it before its rebase gets harder.
 2. **Size** — smaller diffs (`additions + deletions`) go earlier, as a last resort only. Don't let size override blast radius; a small PR with a large blast radius still goes later.
 
+### Severity override
+
+Blast radius optimizes engineering cost (total rework across the queue). A linked issue's severity is a different axis — urgency of delay — and the two can conflict. Don't blend them into one score; use a two-tier structure instead:
+
+1. For each PR, check for linked issues: `gh pr view <N> --json closingIssuesReferences` (catches "Fixes #N" / "Closes #N" in the PR body), then `gh issue view <N> --json labels,title` for each linked issue.
+2. If any linked issue carries a label indicating critical severity (security, data-loss, crash, or an explicit critical/P0-style label — the exact convention varies by repo, so check what labels this repo actually uses rather than assuming a scheme), that PR is promoted to a **critical tier** ahead of the entire blast-radius-ranked queue, regardless of its own blast radius.
+3. Order the critical tier among itself the same way (blast radius, then tiebreakers) if more than one PR qualifies.
+4. Everything without a critical-severity linked issue stays in the normal blast-radius-ranked pool, unaffected by lower-priority labels (a "P2" or "enhancement" label is not a promotion signal — only genuine urgency is).
+5. If no severity labels exist in the repo at all, say so once and skip this step — don't invent a severity scheme.
+
+When a PR is promoted, state the tradeoff explicitly in the deliverable rather than folding it into a blended number: which PR, which linked issue and severity, and which other PRs now bear increased rebase cost as a result.
+
 ## Phase 4: Semantic overlap judgment (only for overlapping pairs)
 
 Raw file overlap over-flags: two PRs can touch the same file without ever touching the same logic. For every pair flagged in Phase 2, read both diffs (`gh pr diff <N>`) and classify:
@@ -55,17 +87,35 @@ State your confidence and reasoning for each classification. If a pair's overlap
 
 ## Phase 5: Deliverable
 
-Write to `PR_TRIAGE.md` in the repo root:
+This project uses `.claude/tmp/` as the shared convention for ephemeral skill output — never `.claude/` broadly, since `.claude/skills/` and `.claude/settings.json` may be intentionally tracked. Each skill gets its own subdirectory so scratch files stay findable and don't collide. Before writing anything:
 
-* **Summary table** — columns: `PR # | Title | Author | Files Changed | Overlaps With | Blast Radius | Staleness (days) | Size (+/-) | Mergeable? | Suggested Order`.
+1. `mkdir -p .claude/tmp/pr-triage`
+2. Check `.gitignore` for a `.claude/tmp/` entry. If absent, append one line: `.claude/tmp/` with a comment noting it's the shared scratch dir for ephemeral Claude Code skill output. This single directory-level entry covers `pr-triage` and every other skill that adopts the convention — don't add per-skill or per-file entries.
+3. Determine the filename: `PR_TRIAGE.md` for a full-queue run, or `PR_TRIAGE-<numbers>.md` (PR numbers sorted ascending, e.g. `PR_TRIAGE-7-8-12.md`) for a scoped run — so `list` output and the filename itself communicate what each run covered without opening the file.
+
+Then write `.claude/tmp/pr-triage/<filename>`, starting with a YAML frontmatter block so `list` can report status without re-parsing the whole report:
+
+```yaml
+---
+generated: <ISO 8601 timestamp>
+prs: [7, 8, 12]
+critical: 1
+---
+```
+
+`prs` is the full list of PR numbers this snapshot covers; `critical` is the count promoted via the severity override in Phase 3's tiebreaker logic. Then the body:
+
+* **Summary table** — columns: `PR # | Title | Author | Linked Issue (severity) | Files Changed | Overlaps With | Blast Radius | Staleness (days) | Size (+/-) | Mergeable? | Suggested Order`.
 * **Recommended merge sequence** — numbered list, one line of rationale per PR (e.g., "merge 3rd: overlaps only with #8, which is already stale and low-priority").
+* **Severity overrides** — any PR promoted ahead of blast-radius order due to a critical-severity linked issue, naming the issue and which other PRs now bear increased rebase cost as a result. Omit this section entirely (don't write "none") if the repo has no severity-labeled issues linked to any open PR.
 * **Overlap detail** — for each overlapping pair, the Phase 4 classification and reasoning. Incidental-adjacency pairs can be one line; likely-collision pairs get a short explanation of what's actually colliding and why it matters.
 * **Already-conflicting PRs** — any PR GitHub already reports as `CONFLICTING` against the current base, called out separately since these need author action regardless of queue position.
 * **Open questions** — overlaps you couldn't classify confidently, PRs with unclear base commits, or anything needing the maintainer's judgment.
 
 ## Rules
 
-* Never merge, push, rebase, or force-push anything — this skill only reads (`gh pr list`, `gh pr diff`, `git log`) and writes `PR_TRIAGE.md`.
+* Never merge, push, rebase, or force-push anything — this skill only reads (`gh pr list`, `gh pr diff`, `git log`) and writes under `.claude/tmp/pr-triage/`.
+* `clean` and `clean --all` are the only operations that delete anything, and both require showing the candidate list and getting explicit confirmation first — never delete silently, even though these are scratch files.
 * Base blast-radius and overlap claims on the actual file/diff data, not assumption. If `gh` or `git` calls fail (rate limit, auth), say so and stop rather than guessing at PR contents.
 * Keep size and staleness as tiebreakers only — never let them override blast radius in the primary ranking.
 * Label semantic-collision judgments as judgment calls, not certainty. "Likely collision" and "confirmed collision" are different claims — don't collapse them.
@@ -73,7 +123,7 @@ Write to `PR_TRIAGE.md` in the repo root:
 
 ## Repeat-run mode
 
-If `PR_TRIAGE.md` already exists, read it first. Mark PRs no longer open as `MERGED` or `CLOSED`, re-rank the remaining queue against the current base, and note which recommendations changed since the last run and why (usually: a merge happened, or a PR was updated).
+If a file matching the current invocation's scope already exists in `.claude/tmp/pr-triage/` (`PR_TRIAGE.md` for a full run, `PR_TRIAGE-<numbers>.md` for a scoped run), read it first. Mark PRs no longer open as `MERGED` or `CLOSED`, re-rank the remaining queue against the current base, and note which recommendations changed since the last run and why (usually: a merge happened, or a PR was updated). A full-queue run and a scoped run are tracked separately — don't treat one as a substitute for the other's history.
 
 ---
 
@@ -107,13 +157,44 @@ In Claude Code, in the repo whose PR queue you want triaged:
 /pr-triage
 ```
 
-Output goes to `PR_TRIAGE.md` in the repo root. On a queue of 5–10 PRs this should take a few minutes; it scales roughly with the number of overlapping pairs, since those are the ones that need a real diff read in Phase 4.
+Output goes to `.claude/tmp/pr-triage/PR_TRIAGE.md` for a full-queue run — this project's shared scratch convention for ephemeral skill output, namespaced per-skill (`pr-triage/`) so it's obvious which skill produced which file when you're browsing `.claude/tmp/`. The skill creates the directory and adds a single `.claude/tmp/` line to `.gitignore` on first run if it's not already there; every skill that adopts this convention shares that one gitignore entry rather than each appending its own. The file persists on disk between sessions, so a repeat `/pr-triage` run picks up where the last one left off (see Repeat-run mode) without ever showing up in `git status` or your commit history.
+
+On a queue of 5–10 PRs this should take a few minutes; it scales roughly with the number of overlapping pairs, since those are the ones that need a real diff read in Phase 4.
 
 Scope to a subset if you only want to reason about some of the queue:
 
 ```
 /pr-triage #7 #8 #12
 ```
+
+That writes a separately-tracked `.claude/tmp/pr-triage/PR_TRIAGE-7-8-12.md`, distinct from any full-queue run's history.
+
+Find or open past runs without digging through `.claude/` by hand:
+
+```
+/pr-triage list
+/pr-triage open
+```
+
+`list` shows each snapshot's status at a glance — PR count, critical-override count, and how many of its PRs have since merged vs. are still outstanding:
+
+```
+PR_TRIAGE-7-8-12.md   3 PRs, 1 critical, 1 merged, 2 outstanding [#7, #8]
+PR_TRIAGE.md          5 PRs, 0 critical, 3 merged, 2 outstanding [#9, #14]
+```
+
+`open` opens the folder in Finder (macOS). This exists specifically so you don't have to remember the skill name or go spelunking through `.claude/tmp/` the way you'd hunt for an Xcode build product in DerivedData.
+
+Clean up old snapshots when you're done with them:
+
+```
+/pr-triage clean
+/pr-triage clean --all
+```
+
+Plain `clean` only removes snapshots whose entire referenced PR set has since merged or closed — those have no Repeat-run value left. It'll show you the candidates and what it's keeping (anything still referencing an open PR) before deleting. `clean --all` wipes the whole directory unconditionally. Both ask for confirmation first.
+
+**Not yet implemented:** a `view` subcommand (opens the most-recently-generated snapshot in the system default `.md` viewer, for "I just ran this and closed the window, let me look again" — no rerun, no state check) and a `pick` subcommand (list + choose, for when `view`'s most-recent guess isn't the one you want). Until these exist, `open` + double-click covers the same need.
 
 ## How this fits with your other skills
 
@@ -122,6 +203,18 @@ Run `/pr-triage` first when you're facing more than 2–3 open PRs and want a me
 ## Why blast radius instead of size or complexity
 
 Ranking by size ("merge small ones first") or by complexity ("get the big one out of the way") both optimize the wrong unit — the PR being merged, not the total work left in the queue. A small PR that happens to touch a file every other open PR also touches will force a rebase on all of them; a large PR touching a file nobody else is in costs nothing to merge first. Blast radius is a direct measure of what actually happens to the rest of the queue, which is the thing you're trying to minimize. Size and staleness only break ties among PRs that disturb the queue equally.
+
+## Why severity is a tier, not a weight in the score
+
+Blast radius measures engineering cost; issue severity measures urgency of delay. They're different axes and can point opposite directions — a critical fix can easily be the PR with the *worst* blast radius, if the bug lives in commonly-touched code. Folding both into one weighted number would hide that tension behind an opaque score. Tiering makes the tradeoff explicit instead: critical-severity fixes jump the queue, and the deliverable says outright who pays for that in extra rebase work. That's a decision worth seeing, not one worth automating away.
+
+## The `.claude/tmp/<skill-name>/` convention
+
+This skill writes to `.claude/tmp/pr-triage/` rather than the repo root, and only ever appends one `.gitignore` line (`.claude/tmp/`) for the whole directory rather than one per output file or per skill. This is meant to be a shared convention across your skills ecosystem, not specific to `pr-triage` — any future audit-style skill that generates ephemeral, quickly-stale output can adopt the same boilerplate (`mkdir -p .claude/tmp/<skill-name>`, check-and-append the single shared gitignore line) instead of inventing its own output path and gitignore handling. Worth writing this down once in a `CONVENTIONS.md` in your `claude-skills` repo so it's copy-paste consistent rather than reinvented per skill.
+
+The per-skill subdirectory exists specifically so the output is findable without already knowing what you're looking for — a flat `.claude/tmp/` shared across many skills would eventually become exactly the kind of "where did that file go" problem the convention is meant to solve. `list` and `open` subcommands are the other half of that: rather than requiring you to remember the skill name or `cd` into `.claude/tmp/` by hand, the skill can surface its own scratch output on request. If you adopt this pattern elsewhere, consider giving other scratch-producing skills the same two subcommands for the same reason.
+
+`tech-debt-audit`, `project-review`, and `code-review` are candidates to migrate their transient working files to this same path if you want their scratch output out of the repo tree too — separate from the question of whether their *durable* findings belong in GitHub Issues instead.
 
 ## Limitations
 
