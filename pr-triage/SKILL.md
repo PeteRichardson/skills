@@ -24,14 +24,27 @@ Output is invalidated by the next merge event in the queue — it is not a durab
 
 Check the invocation before doing anything else:
 
-* **`/pr-triage list`** — for every file in `.claude/tmp/pr-triage/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`prs`, `critical`, `generated`) rather than the full report. Then make **one** `gh pr list --state all --json number,state` call covering the union of every `prs` array across all files, and classify each file's PRs as merged/closed vs still open against that single result — don't make a separate API call per file. Report each file as:
+* **`/pr-triage list`** — for every file in `.claude/tmp/pr-triage/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`prs`, `generated`) rather than the full report. Then make **one** `gh pr list --state all --json number,state,title,url,mergedAt,closedAt` call covering the union of every `prs[].number` across all files, and classify each file's PRs against that single result — don't make a separate API call per file. Titles and URLs come from this live call, not from the report body, so a since-renamed PR still shows its current title.
+
+  For each file, print the filename, its `generated` timestamp, and its resolved absolute path on one line, then two groups below it — always both shown in full, no flag to hide either:
 
   ```
-  PR_TRIAGE-7-8-12.md   3 PRs, 1 critical, 1 merged, 2 outstanding [#7, #8]
-  PR_TRIAGE.md          5 PRs, 0 critical, 3 merged, 2 outstanding [#9, #14]
+  PR_TRIAGE-7-8.md  (generated 2026-07-18 14:32)  /Users/pete/project/.claude/tmp/pr-triage/PR_TRIAGE-7-8.md
+      #8  ‼ Add rate limiting to /api/upload       https://github.com/org/repo/pull/8
+      #7    Fix login redirect loop                https://github.com/org/repo/pull/7
+      ---
+      #5  ‼ Fix data loss on export bug            merged 2026-07-19  https://github.com/org/repo/pull/5
+      #9    Old experimental sync flag             closed 2026-07-16  https://github.com/org/repo/pull/9
+      #3    Add CSV export                         merged 2026-07-15  https://github.com/org/repo/pull/3
   ```
 
-  Sort newest-generated first (from the frontmatter `generated` timestamp, not file mtime — mtime can be misleading if files are ever copied or touched). If a file has no frontmatter (e.g. hand-edited or from an older version of this skill), fall back to filename and last-modified time only, and note it's missing status. Stop here; don't run a triage.
+  - **Outstanding** (PRs the live result doesn't report as `MERGED` or `CLOSED`): one line per entry, in `prs` array order (the file's recommended-merge order), prefixed with `‼` when that entry's frontmatter `critical` is `true`, unprefixed otherwise. No color — plain text only.
+  - A `---` separator line, only if both groups are non-empty.
+  - **Merged/closed**: one line per entry, newest resolution first — sort by `mergedAt` for PRs the live result reports as `MERGED`, by `closedAt` for `CLOSED`. Same `‼` prefix convention, driven by the frontmatter `critical` flag, so a PR that was critical keeps that marker after it resolves. Each line ends with `merged <date>` or `closed <date>` per the live result's own `state` field — `CLOSED` is "abandoned without merging," never fold it into a `merged` count.
+  - Each `#N Title` line ends with the PR's plain `url` from the live result — plain text, not a rendered hyperlink. (Raw OSC 8 codes in response text render as literal garbage rather than a clickable link — see Global Constraints.)
+  - If a file's `prs` array is empty, print just its filename/timestamp/path line — no separator, no empty group headers.
+
+  Sort files newest-generated first (from the frontmatter `generated` timestamp, not file mtime — mtime can be misleading if files are ever copied or touched). If a file has no frontmatter (e.g. hand-edited or from an older version of this skill), fall back to filename and last-modified time only, and note it's missing status. Stop here; don't run a triage.
 * **`/pr-triage open`** — run `open .claude/tmp/pr-triage/` (macOS). If `open` isn't available, fall back to printing the absolute path. Stop here; don't run a triage.
 * **`/pr-triage clean`** — read every file's frontmatter for its `prs` list, then make one `gh pr list --state all --json number,state` call covering the union (same approach as `list`) rather than one call per file. Any file whose entire `prs` set is now merged or closed is a candidate for removal — there's no Repeat-run continuity value left in a snapshot whose whole queue has resolved. Show the candidate list plus, separately, what's being kept and why (any file referencing at least one still-open PR), and ask for confirmation before deleting. Stop here; don't run a triage.
 * **`/pr-triage clean --all`** — unconditional wipe of everything in `.claude/tmp/pr-triage/`, regardless of PR state. Show what will be deleted and ask for confirmation first. Stop here; don't run a triage.
