@@ -98,12 +98,17 @@ Then write `.claude/tmp/pr-triage/<filename>`, starting with a YAML frontmatter 
 ```yaml
 ---
 generated: <ISO 8601 timestamp>
-prs: [7, 8, 12]
-critical: 1
+prs:
+  - number: 7
+    critical: false
+  - number: 8
+    critical: true
+  - number: 12
+    critical: false
 ---
 ```
 
-`prs` is the full list of PR numbers this snapshot covers; `critical` is the count promoted via the severity override in Phase 3's tiebreaker logic. Then the body:
+`prs` is an ordered array covering every PR this snapshot tracks, one entry per PR, in the Phase 3/severity-override recommended merge order (order is irrelevant for entries that later merge or close — `list` re-sorts those by resolution date instead, see Phase 0). `critical` on each entry records whether Phase 3's severity override promoted that PR — set it once at write time from Phase 3's own determination, never recomputed from anything else. Entries are never removed from `prs`, even after the PR merges or closes — see Repeat-run mode below for why. Then the body:
 
 * **Summary table** — columns: `PR # | Title | Author | Linked Issue (severity) | Files Changed | Overlaps With | Blast Radius | Staleness (days) | Size (+/-) | Mergeable? | Suggested Order`.
 * **Recommended merge sequence** — numbered list, one line of rationale per PR (e.g., "merge 3rd: overlaps only with #8, which is already stale and low-priority").
