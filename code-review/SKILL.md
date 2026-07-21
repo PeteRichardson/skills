@@ -76,6 +76,8 @@ Show me the SQL injection in parse_user_id again
 
 ## Issue Categories & Importance
 
+Two axes, not four peers: **HIGH / MEDIUM / LOW are severity tiers.** **IDIOM is a category** (language-fluency value), scored separately and always reported alongside its own derived severity rather than being a fourth tier on the same axis — this matches how `/project-review` treats IDIOM findings (a category with a Medium severity floor), so a finding filed from either skill gets consistent severity/category labels downstream.
+
 ### HIGH (always shown, no filtering)
 Critical issues that block shipping or break things:
 - Security vulnerabilities (SQL injection, buffer overflows, unauthorized access)
@@ -96,6 +98,8 @@ Language idioms and best practices. Not idiomatic code signals knowledge gaps.
 **Examples:**
 - **RAII in C++**: interview +3 (red flag if missing), simplification +2, impact +3 = **8/10**
 - **Optional chaining in Swift**: interview +1, simplification +3, impact +3 = **7/10**
+
+**Derived severity:** every IDIOM finding also gets a severity computed from its total score — **≥ 7/10 → High, otherwise → Medium** (never Low; mirrors `/project-review`'s Medium floor for its own IDIOM category). Show both the category and the derived severity in the report (see Report Structure) so the finding carries the same two labels a `/project-review` finding would.
 
 ### MEDIUM (scored & ranked)
 Inefficiencies, error handling gaps, edge cases, maintainability issues:
@@ -215,14 +219,18 @@ scope: src/
 
 ## 🟠 IDIOM + 🟡 MEDIUM (ranked by importance, Y of Z shown)
 
-### N. [Issue name] (IDIOM|MEDIUM) — Importance: S/10
+### N. [Issue name] (MEDIUM) — Importance: S/6
+**Location:** path/file.ext:LINE
+**Score breakdown:** Scope & impact: +S
+
+### N. [Issue name] (IDIOM) — Severity: High|Medium — Importance: S/10
 **Location:** path/file.ext:LINE
 **Score breakdown:**
 - Interview knowledge: +X
 - Code simplification: +X
 - Scope & impact: +X
 
-[For IDIOM: show current code AND idiomatic alternative with explanation]
+[Show current code AND idiomatic alternative with explanation]
 
 [... more IDIOM+MEDIUM issues ...]
 
