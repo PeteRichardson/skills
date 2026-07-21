@@ -13,6 +13,9 @@ disable-model-invocation: false
     - Phase 2, dimension 10: UX & CLI ergonomics (new)
     - Phase 2, dimension 11: Idiom debt (new — learning-value framing, mirrors the /code-review skill)
     - Phase 3: idiom-floor note for ranking + "Related tactical findings" appendix
+    - Phase 1: finding IDs (F1, F2, ...) derive their starting number from a git-history scan
+      instead of always starting at F1, so a regenerated/deleted PROJECT_REVIEW.md can't collide
+      with IDs already cited in commit messages or prior committed snapshots
     - Stack-specific tooling: added Swift and C/C++ (upstream only covered TS/JS, Python, Rust, Go)
     - Model-invocation enabled with conversational trigger phrases (upstream was explicit-only)
   Everything else is unmodified from upstream. Re-diff against upstream periodically
@@ -40,9 +43,25 @@ Do not skip this. Forming opinions before understanding the system produces bad 
 1. Read the README, package manifest (`package.json` / `pyproject.toml` / `Cargo.toml` / `go.mod` / `Package.swift` / `CMakeLists.txt`), and any architecture docs in `/docs` or `/adr`.
 2. Map the directory structure and identify the major modules / layers.
 3. Run `git log --oneline -200` and `git log --stat --since="6 months ago"` to see what's actually changing and where churn concentrates.
-4. Identify entry points, hot paths, and cold corners.
-5. List the top 20 largest files by line count, and the 20 files most frequently modified in the last 6 months. The intersection is where debt usually hides.
-6. Publish a plan using your environment's task-tracking mechanism (e.g. a todo/plan list) so the user can see progress through the phases.
+4. Determine the starting finding ID for this run (see below). Do this even if `docs/reviews/PROJECT_REVIEW.md` doesn't currently exist.
+5. Identify entry points, hot paths, and cold corners.
+6. List the top 20 largest files by line count, and the 20 files most frequently modified in the last 6 months. The intersection is where debt usually hides.
+7. Publish a plan using your environment's task-tracking mechanism (e.g. a todo/plan list) so the user can see progress through the phases.
+
+**Finding ID numbering.** Findings get cited elsewhere (commit messages, GitHub issues) by their short ID, so a regenerated report must never reuse an ID that's already in use — even if `docs/reviews/PROJECT_REVIEW.md` itself was deleted or was never committed. Determine the next available ID from three sources and take the max:
+
+```bash
+# 1. Current live doc, if present
+grep -oE '^\| F[0-9]+ ' docs/reviews/PROJECT_REVIEW.md 2>/dev/null
+
+# 2. Any committed version of a review doc, past or present, anywhere in history
+git log --all -p -- 'docs/reviews/PROJECT_REVIEW*.md' | grep -oE '\bF[0-9]+\b'
+
+# 3. Citations in commit messages across all branches (this repo's own convention, e.g. "(PROJECT_REVIEW.md F5)")
+git log --all --pretty=format:%B | grep -oE '\bF[0-9]+\b'
+```
+
+Take the highest number found across all three (0 if none), and start this run's new findings at that number **+ 1**. This is a git-log scan, not a stored counter — a few seconds even on large histories — and it self-heals if the doc is ever deleted, since commit messages and any past committed snapshot survive independently of the working tree. Findings carried over from an existing live doc (Repeat-run mode) keep their original ID; only genuinely new findings draw from this counter.
 
 Write a 1–2 paragraph mental model of the architecture before proceeding. If your model contradicts the README, flag it — that itself is a finding.
 
@@ -81,7 +100,7 @@ Write to `docs/reviews/PROJECT_REVIEW.md` with this structure:
 
 * **Executive summary** — max 10 bullets, ranked by impact.
 * **Architectural mental model** — your understanding of the system as it actually is.
-* **Findings table** — columns: `ID | Category | File:Line | Severity (Critical/High/Medium/Low) | Effort (S/M/L) | Description | Recommendation`. Aim for 30–80 findings; padding past that is noise. `IDIOM`-category findings carry a ranking floor of Medium regardless of maintenance-impact severity, since language-fluency value counts as impact here — note the true maintenance severity in the description if it's lower.
+* **Findings table** — columns: `ID | Category | File:Line | Severity (Critical/High/Medium/Low) | Effort (S/M/L) | Description | Recommendation`. IDs are sequential starting from the counter determined in Phase 1 — never restart at F1 unless that scan genuinely found nothing anywhere. Aim for 30–80 findings; padding past that is noise. `IDIOM`-category findings carry a ranking floor of Medium regardless of maintenance-impact severity, since language-fluency value counts as impact here — note the true maintenance severity in the description if it's lower.
 * **Related tactical findings** — 1–3 bullets pointing at relevant `docs/reviews/*.md` reports (still-fresh per Phase 1.5) for line-level detail this audit intentionally doesn't restate. Omit this section if no `/code-review` reports exist yet.
 * **Top 5 "if you fix nothing else, fix these"** — with concrete diff sketches or refactor outlines, not vague advice.
 * **Quick wins** — Low effort × Medium+ severity, as a checklist.
@@ -119,7 +138,9 @@ If parallel subagent dispatch isn't available, read serially but prioritize the 
 
 ## Repeat-run mode
 
-If `docs/reviews/PROJECT_REVIEW.md` already exists, read it first. Mark resolved findings as `RESOLVED`, update stale ones, and tag new findings with `NEW`. This turns the audit into a living document tracked over time.
+If `docs/reviews/PROJECT_REVIEW.md` already exists, read it first. Mark resolved findings as `RESOLVED`, update stale ones, and tag new findings with `NEW`. This turns the audit into a living document tracked over time. Findings that persist across runs keep their original ID; only new findings draw the next number from the Phase 1 ID scan.
+
+If the file *doesn't* exist — deleted, never committed, or this is a genuinely fresh audit — don't assume that means F1 is safe to reuse. Run the Phase 1 ID scan regardless; it checks git history independently of whether the working-tree file survived.
 
 ---
 
@@ -194,6 +215,14 @@ Most "code review" prompts produce a bulleted list of generic best-practice viol
 **The "looks bad but is actually fine" section is required.** This is the one most people remove when adapting the prompt. Don't. Forcing the model to surface the calls it considered making and chose not to is what separates a real audit from a checklist regurgitation. If that section is empty, the audit is shallow.
 
 The skill also explicitly forbids recommending rewrites and forbids padding categories. Both are common LLM failure modes — rewriting is easier than diagnosing, and padding makes outputs feel thorough when they aren't.
+
+## Why finding IDs come from git history, not a stored counter
+
+A short ID (`F1`, `F2`, ...) is only useful if it stays stable once something durable references it — a commit message, a linked GitHub issue. The natural instinct is to track a counter somewhere so regenerated reports don't reuse old IDs, but the report itself is the wrong place to store it: it's explicitly designed to be deleted or regenerated whenever it goes stale or you stop trusting it (see Repeat-run mode), so a counter living in its own frontmatter dies exactly when you need it most.
+
+Git history doesn't have that problem. Commit messages that cite a finding (e.g. `(PROJECT_REVIEW.md F5)`) and any review doc ever committed both survive independently of whatever's currently on disk — which is exactly the case that motivated this: a prior version of a project's `PROJECT_REVIEW.md` was deleted outside of git entirely, but its findings were still reconstructable from commit messages alone. Scanning `git log` for the highest cited ID costs a few seconds and self-heals from that scenario automatically, with no state file to lose.
+
+The one thing this doesn't protect: a finding that was minted, never fixed, never cited anywhere, and then lost when the doc was deleted. Its ID could theoretically get reused later. That's an acceptable trade — if nothing external ever pointed at it, nothing gets confused by reassignment either. A true clean-slate restart (new orphan branch, wiped history) resets the counter too, which is correct, not a bug.
 
 ## Adaptation notes
 
