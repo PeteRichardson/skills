@@ -16,6 +16,10 @@ disable-model-invocation: false
     - Phase 1: finding IDs (F1, F2, ...) derive their starting number from a git-history scan
       instead of always starting at F1, so a regenerated/deleted PROJECT_REVIEW.md can't collide
       with IDs already cited in commit messages or prior committed snapshots
+    - Phase 2: dimensions 12-13 (Correctness & memory safety, Data integrity & robustness) —
+      new, added after a first /make-issues run showed real findings that didn't fit the
+      original 11; the vocabulary is now explicitly extensible (favor reuse, allow a new
+      category when genuinely justified) instead of an implicit closed set
     - Stack-specific tooling: added Swift and C/C++ (upstream only covered TS/JS, Python, Rust, Go)
     - Model-invocation enabled with conversational trigger phrases (upstream was explicit-only)
   Everything else is unmodified from upstream. Re-diff against upstream periodically
@@ -93,6 +97,18 @@ Use `rg`, `ast-grep`, and language-native tooling to find concrete examples. Cit
 9. **Documentation drift** — README claims that don't match reality, comments that contradict adjacent code, public APIs without docstrings.
 10. **UX & CLI ergonomics** — confusing, inconsistent, or non-standard CLI argument/flag names; missing or unhelpful `--help` output; error messages that describe the problem but not what to do next; silent flag conflicts or precedence surprises; inconsistent verb/noun conventions across subcommands; poor discoverability of existing features. Applies to CLI tools, TUIs, and any dev-facing interface; write "N/A — no user-facing interface" for pure libraries rather than skipping the section.
 11. **Idiom debt** — code that works but isn't idiomatic for its language: patterns a fluent Rust/Swift/Python/C++ engineer would flag on sight, or that would raise an eyebrow in a technical interview (e.g. manual `fopen`/`fclose` in C++ instead of RAII, index-loop iteration instead of iterators/ranges, manual `Option` unwrapping instead of combinators, force-unwraps in Swift where optional binding is idiomatic). Tag these `IDIOM` rather than folding them into Consistency rot — they're flagged for language-fluency value as much as for maintenance cost, and should be called out even when their maintenance-impact severity alone would be Low.
+12. **Correctness & memory safety** — memory leaks, use-after-free, dangling pointers, buffer overflows, crashes, deadlocks, and other severe correctness bugs where the failure mode is the program doing something actively unsafe or wrong at runtime (not just producing a suboptimal result). Often but not exclusively a C/C++ concern.
+13. **Data integrity & robustness** — silent data loss or corruption (e.g. a collision or overwrite that drops a record without error), and code that doesn't gracefully handle malformed, out-of-range, or otherwise unexpected input — the failure mode is wrong or missing *data*, without a crash or a security exposure. Distinct from #12: nothing here is unsafe or exploitable, just quietly incorrect.
+
+### Category vocabulary: favor reuse, allow new categories when genuinely justified
+
+The 13 categories above are a starting vocabulary, not a hard enum — but reuse is the default, not the exception. Before assigning a finding's Category:
+
+1. Check whether it fits one of the 13 above, including a close semantic match (a finding about "data consistency" fits **Data integrity & robustness** just fine — don't invent a near-synonym because the exact wording doesn't match).
+2. If this repo already has GitHub issues from a prior `/make-issues` run, a quick `gh label list` (best-effort — skip silently if `gh` isn't available or the repo has no GitHub remote) shows which `category:` labels are already established here; prefer reusing one of those over minting something new, for the same close-semantic-match reason.
+3. Only introduce a genuinely new category when a finding clearly doesn't fit anywhere above — not as a routine escape hatch. Name it as a general, reusable class of issue (not a description of this one finding), and call it out explicitly in the Executive summary (e.g. "New category introduced: X — because...") so it's visible rather than silently drifting.
+
+This mirrors why `/project-review` finding IDs derive from git history instead of a fixed or purely-local counter: a taxonomy invented once, in advance, before seeing real findings, will be wrong at the margins — better to bias toward the existing vocabulary and let it grow deliberately than to force bad fits or let it drift unconstrained.
 
 ## Phase 3: Deliverable
 
@@ -100,7 +116,7 @@ Write to `docs/reviews/PROJECT_REVIEW.md` with this structure:
 
 * **Executive summary** — max 10 bullets, ranked by impact.
 * **Architectural mental model** — your understanding of the system as it actually is.
-* **Findings table** — columns: `ID | Category | File:Line | Severity (Critical/High/Medium/Low) | Effort (S/M/L) | Description | Recommendation`. IDs are sequential starting from the counter determined in Phase 1 — never restart at F1 unless that scan genuinely found nothing anywhere. Aim for 30–80 findings; padding past that is noise. `IDIOM`-category findings carry a ranking floor of Medium regardless of maintenance-impact severity, since language-fluency value counts as impact here — note the true maintenance severity in the description if it's lower.
+* **Findings table** — columns: `ID | Category | File:Line | Severity (Critical/High/Medium/Low) | Effort (S/M/L) | Description | Recommendation`. IDs are sequential starting from the counter determined in Phase 1 — never restart at F1 unless that scan genuinely found nothing anywhere. Category values come from the Phase 2 vocabulary (favor reuse; see "Category vocabulary" note in Phase 2 for when a new one is genuinely warranted) and may be compound (`A / B`) when a finding spans two dimensions. Aim for 30–80 findings; padding past that is noise. `IDIOM`-category findings carry a ranking floor of Medium regardless of maintenance-impact severity, since language-fluency value counts as impact here — note the true maintenance severity in the description if it's lower.
 * **Related tactical findings** — 1–3 bullets pointing at relevant `docs/reviews/*.md` reports (still-fresh per Phase 1.5) for line-level detail this audit intentionally doesn't restate. Omit this section if no `/code-review` reports exist yet.
 * **Top 5 "if you fix nothing else, fix these"** — with concrete diff sketches or refactor outlines, not vague advice.
 * **Quick wins** — Low effort × Medium+ severity, as a checklist.
