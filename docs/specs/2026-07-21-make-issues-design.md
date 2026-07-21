@@ -1,6 +1,6 @@
 # `/make-issues` — design
 
-Status: proposed, not yet implemented.
+Status: implemented and validated against a real repo (`t`). One design revision already made from real evidence: the category vocabulary was originally closed (see the struck-through framing in "Label seeding" below); a first live run surfaced findings that didn't fit it well, so it's now an extensible baseline — see "Category vocabulary" below.
 
 ## Problem
 
@@ -24,7 +24,8 @@ Status: proposed, not yet implemented.
 ## Non-goals
 
 - **Not a `/project-review` or `/code-review` subcommand.** Both source skills are read-only; this skill mutates GitHub (creates issues, comments on existing ones). Different blast radius, kept as a separate skill — same reasoning as why `pr-triage` and `code-review` stay separate from each other.
-- **Not a live LabelKit sync.** The vendored label list, once seeded, is this skill's own source of truth going forward. `PeteRichardson/LabelKit` was only the starting snapshot.
+- **Not a live LabelKit sync.** The vendored label list, once seeded, is this skill's own source of truth going forward. `PeteRichardson/LabelKit` was only the starting snapshot. (Severity/effort/source stay a fixed set; category does not — see "Category vocabulary" below.)
+- **Not a bulk recategorization tool.** If the category vocabulary drifts messy across many repos/runs despite the reuse-bias, fixing that in bulk is future scope (a hypothetical `/make-issues reorganize` subcommand), not v1. v1's only defense against drift is the reuse-check at label-creation time.
 - **Not perfect dedup.** Matching is best-effort (file + category narrowing, then keyword overlap). Occasional duplicate issue creation is an accepted cost, not a bug to eliminate.
 - **Not auto-closing or auto-updating issues when a finding later resolves.** v1 only creates and backfills; reconciling "this finding is now RESOLVED, should the issue close?" is a possible future addition, not in scope here.
 - **Not resilient to file renames/moves in the fingerprint.** If a file the fingerprint references gets renamed, that issue's dedup entry effectively goes stale (falls back to keyword-only matching, which is weaker). Accepted edge case, not designed around.
@@ -69,7 +70,7 @@ Both end with the hidden fingerprint marker (see Dedup). Since the skill authors
 - *Project-review*: Severity and Effort map directly from their columns. Category: the finding's Category cell is split on `/` first (project-review findings can carry compound categories, e.g. "Architectural decay / dead code", observed directly in the `t` repo's own `PROJECT_REVIEW.md`), and each component becomes its own `category:` label.
 - *Code-review*: severity/category are derived, not read directly, since code-review's HIGH/IDIOM/MEDIUM/LOW tiers aren't a direct match to the `severity:`/`category:` split:
   - **IDIOM tier** → always `category: IDIOM`, plus a derived `severity:` from the existing 1–10 importance score: **≥ 7 → High, otherwise → Medium** (never Low — mirrors `/project-review`'s own rule that IDIOM findings carry a Medium floor regardless of raw impact). This requires a companion edit to `code-review`'s report template so the derived severity is computed and shown once, in the report itself, rather than `make-issues` silently re-deriving a threshold that could drift out of sync with `code-review`'s own scoring scale — see "Companion change to `/code-review`" below.
-  - **HIGH tier** → `severity: High` (or `severity: Critical` if the finding's own text signals something more severe than code-review's HIGH bar, e.g. active data loss — judgment call). Category is LLM-classified against the shared vocabulary from the finding's free-text description, biased toward `category: Security hygiene` or the new `category: Correctness & memory safety` (see Label seeding) since that's what code-review's HIGH tier is defined to contain.
+  - **HIGH tier** → `severity: High` (or `severity: Critical` if the finding's own text signals something more severe than code-review's HIGH bar, e.g. active data loss — judgment call). Category is resolved per "Label seeding"'s category-resolution steps from the finding's free-text description, biased toward `category: Security hygiene` (security vulnerabilities), `category: Correctness & memory safety` (leaks/UAF/dangling pointers/crashes — an actively unsafe runtime failure), or `category: Data integrity & robustness` (a severe correctness bug that loses/corrupts data without crashing) since that's the space code-review's HIGH tier is defined to contain.
   - **MEDIUM tier** → `severity: Medium`. Category LLM-classified against the shared vocabulary — code-review's own stated MEDIUM examples map onto existing categories directly enough that a plain description-based classification should land correctly most of the time: missing nil/error checks and incomplete error handling → Error handling & observability; performance bottlenecks → Performance & resource hygiene; high cyclomatic complexity → Architectural decay.
   - **LOW tier** → `severity: Low`. Category LLM-classified — style/naming → Consistency rot; missing comments → Documentation drift.
 
@@ -77,7 +78,7 @@ Both end with the hidden fingerprint marker (see Dedup). Since the skill authors
 
 ### Label seeding
 
-Vendored table, 21 labels total (12 category + 4 severity + 3 effort + 2 source), matching the combined closed vocabulary of `/project-review`'s Phase 2 dimensions and `/code-review`'s severity/IDIOM tiers. This is the union of `PeteRichardson/LabelKit`'s original 15 labels, the 3 gaps identified against `/project-review` alone (`category: Performance & resource hygiene`, `category: Security hygiene`, `severity: Critical`), one further gap identified by extending to `/code-review` (`category: Correctness & memory safety` — covers memory safety, crashes/deadlocks, and severe correctness bugs that don't fit any existing category), and a new `source:` pair so issues stay filterable by which tool produced them:
+Vendored baseline, 22 labels total (13 category + 4 severity + 3 effort + 2 source), matching `/project-review`'s Phase 2 dimensions and `/code-review`'s severity/IDIOM tiers. Origin: `PeteRichardson/LabelKit`'s original 15, the 3 gaps identified against `/project-review` alone (`category: Performance & resource hygiene`, `category: Security hygiene`, `severity: Critical`), `category: Correctness & memory safety` (added for `/code-review`'s memory-leak/crash/UAF HIGH tier), `category: Data integrity & robustness` (added after the first live run — see "Category vocabulary" below), and a `source:` pair so issues stay filterable by which tool produced them:
 
 ```
 category: Architectural decay              #d4c5f9
@@ -92,6 +93,7 @@ category: IDIOM                            #d4c5f9
 category: Performance & resource hygiene   #d4c5f9
 category: Security hygiene                 #d4c5f9
 category: Correctness & memory safety      #d4c5f9
+category: Data integrity & robustness      #d4c5f9
 
 severity: Critical   #b60205
 severity: High        #d73a4a
@@ -106,7 +108,19 @@ source: project-review   #bfd4f2
 source: code-review      #bfd4f2
 ```
 
-Because category/severity/effort are closed vocabularies (now spanning both source skills' own SKILL.md definitions), this table should need no runtime additions in practice. Before creating any issue, the skill still checks the target repo has all 21 (`gh label list`) and creates any missing ones (`gh label create`) as a defensive fallback — cheap, and the same self-healing posture already adopted for `/project-review`'s finding-ID scan, protecting against a future edit to either dimension list rather than anything expected to fire today.
+`severity:`/`effort:`/`source:` are closed, structural vocabularies — check with `gh label list` before the first create of a run and create anything missing from the fixed list above, as a defensive fallback rather than an expected-to-fire case.
+
+### Category vocabulary: favor reuse, allow new categories when genuinely justified
+
+`category:` is **not** closed, unlike the other three label groups — this is a revision from the original design, made after the first live run against `t`. Originally this table was framed the same way as severity/effort ("closed, should need no runtime additions"), on the theory that `/project-review`'s 11 (now 13) Phase 2 dimensions were an exhaustive enumeration. They weren't: 2 of 16 real findings (F9 "Data integrity", F10 "Robustness") got free-text categories that turned out to be *more precise* than the closest existing dimension — forcing them into `Correctness & memory safety` (scoped around code-review's memory-leak/crash/UAF HIGH tier) actively degraded the label, since neither finding was actually a memory-safety issue. `/project-review`'s Phase 2 was extended with those two dimensions as a direct result (see the companion `project-review/SKILL.md` change), closing the specific gap this run exposed — but the underlying lesson generalizes: a taxonomy invented in advance, before seeing real findings, will keep being wrong at the margins at some steady rate. Closing it defensively just means bad fits accumulate silently instead of the vocabulary growing deliberately.
+
+For every `category:` value a finding names, resolve in this order before applying a label:
+
+1. **This repo's existing `category:` labels** (`gh label list`) — reuse on a close semantic match, not just an exact string match (a finding tagged "Data consistency" should reuse an existing `category: Data integrity & robustness` label rather than fork a near-duplicate). This is an LLM judgment call.
+2. **The vendored baseline above** — same close-match reuse logic.
+3. **Otherwise, mint a new one** — `gh label create "category: <name>" --color "d4c5f9" ...`, named as a general reusable class (not a description of this one finding), and mentioned in the run's summary so it's visible rather than silently added.
+
+Accepted cost: despite the reuse-check, an occasional near-duplicate category could still slip through across many runs/repos (the same risk profile as dedup itself — best-effort, not perfect). If it becomes a real problem, a future `/make-issues reorganize` subcommand could holistically re-cluster and merge near-duplicate `category:` labels across a repo's issues — noted as the intended escape valve, not designed further here since it isn't needed yet.
 
 ### Companion change to `/code-review`
 
@@ -142,7 +156,7 @@ keywords: leftMaxWidth, rightMaxWidth, EisenhowerConsoleView, Priority, quadrant
 ### Backfill mechanics
 
 1. `gh issue list --state all --json number,title,body,comments,...` for the whole repo.
-2. For each issue with no fingerprint marker in its body or any comment: ask the LLM to determine whether it references specific code in this repo, and if so, its likely file(s), one or more categories from the closed (now 12-entry) vocabulary, and keywords.
+2. For each issue with no fingerprint marker in its body or any comment: ask the LLM to determine whether it references specific code in this repo, and if so, its likely file(s), one or more categories resolved per the category-resolution steps above, and keywords.
 3. Skip issues that don't look code-related — not forcing every issue into this scheme.
 4. Post a new comment containing the fingerprint marker for everything else, with `source:` omitted or set to `backfill` (it wasn't produced by either review tool).
 
