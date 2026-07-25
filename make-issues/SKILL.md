@@ -67,11 +67,13 @@ For every finding in scope:
    ```html
    <!-- project-review-finding
    source: project-review|code-review
+   finding_id: <F3 (project-review) or the bare ordinal, e.g. 3 (code-review)>
    file: <path>
    category: <primary category>
    keywords: <comma-separated>
    -->
    ```
+   `finding_id` is provenance only — a breadcrumb back to the report row that filed this issue, so a reader (or `/pr-triage`, which surfaces it next to the PR and issue number) can line the three identifiers up without re-deriving anything. It records the ID **as filed** and is never revised: a regenerated report may renumber, and a stale `finding_id` is expected, not an error. It is never a dedup key — see "Why dedup keys on file path + keyword overlap" below.
 5. **Labels to apply**: one `severity: <X>`, one or more `category: <X>` (one per entry in `categories[]`), `effort: <X>` if not null, and `source: project-review` or `source: code-review`.
 
 ## Phase 3: Dedup search, then create
@@ -132,7 +134,7 @@ This is a **baseline, not a closed set** — matches `/project-review`'s own now
 1. `gh issue list --state all --json number,title,body,comments` for the whole repo (open and closed — deliberately, so a matching closed issue is still found later).
 2. For each issue with no fingerprint marker already present (checked in the body and in every comment): determine whether it references specific code in this repo (file paths, function/type names, a stack trace, etc.). If it doesn't look code-related (a feature request with no concrete code references, a question, etc.), skip it — don't force a fit.
 3. For code-related issues: infer the file(s) it concerns, a category resolved per Phase 4's steps, and keywords the same way Phase 2 does (literal identifiers, not paraphrase).
-4. Post a **new comment** (never edit the original body) containing the marker, with `source: backfill` since it wasn't produced by either review tool:
+4. Post a **new comment** (never edit the original body) containing the marker, with `source: backfill` since it wasn't produced by either review tool. Omit `finding_id` entirely — a hand-filed issue has no source report row, and inferring one by matching it against a current report would fabricate provenance:
    ```html
    <!-- project-review-finding
    source: backfill
@@ -189,6 +191,8 @@ Both source skills are read-only analysis tools. This one mutates GitHub — cre
 ## Why dedup keys on file path + keyword overlap, not the doc's own finding IDs
 
 Neither source doc's identifiers survive the way a fingerprint needs to. `PROJECT_REVIEW.md` is explicitly disposable — the user may delete or regenerate it, and `/project-review`'s own finding IDs (`F1`, `F2`, ...) aren't guaranteed stable across a full regeneration beyond what its own git-history scan reconstructs for *its own* numbering purposes, not for cross-referencing GitHub issues. `/code-review` reports don't have stable IDs at all — ordinals reset on `--refresh`, and the reports themselves are gitignored, never entering git history. File path is durable (survives doc regeneration/deletion entirely); keywords pulled from literal code identifiers are far more reproducible across reruns than free-text descriptions, which is why the combination is the fingerprint instead of either doc's own ID scheme.
+
+The marker still *records* the finding ID (`finding_id:`), which is not a contradiction: writing down which report row filed an issue is cheap and useful for cross-referencing (three identifier spaces — PR number, issue number, finding ID — are easy to conflate when reading a `/pr-triage` table), whereas *matching* on it would silently mis-dedup the moment a report regenerates with different numbering. Recorded, displayed, never matched on.
 
 ## Why labels are shared across both source tools instead of two separate taxonomies
 

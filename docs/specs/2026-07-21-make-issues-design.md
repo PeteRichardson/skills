@@ -1,6 +1,6 @@
 # `/make-issues` — design
 
-Status: implemented and validated against a real repo (`t`). One design revision already made from real evidence: the category vocabulary was originally closed (see the struck-through framing in "Label seeding" below); a first live run surfaced findings that didn't fit it well, so it's now an extensible baseline — see "Category vocabulary" below.
+Status: implemented and validated against a real repo (`t`). Two design revisions already made from real evidence: (1) the category vocabulary was originally closed (see the struck-through framing in "Label seeding" below); a first live run surfaced findings that didn't fit it well, so it's now an extensible baseline — see "Category vocabulary" below. (2) The fingerprint marker now also records `finding_id` — reading real `/pr-triage` output, PR numbers, issue numbers, and finding IDs proved easy to conflate, and nothing durably recorded the report row an issue came from. See "Dedup / fingerprinting" below; it is provenance for display, still never a dedup key.
 
 ## Problem
 
@@ -141,12 +141,14 @@ Marker format, an HTML comment (invisible in rendered GitHub UI), identical rega
 ```html
 <!-- project-review-finding
 source: project-review
+finding_id: F7
 file: Sources/t/EisenhowerConsoleView.swift
 category: Architectural decay
 keywords: leftMaxWidth, rightMaxWidth, EisenhowerConsoleView, Priority, quadrant mapping, hardcoded array
 -->
 ```
 
+- **`finding_id`**: recorded, displayed, never matched on — a second design revision, driven by real use (see Status above). The dedup argument against finding IDs is about *matching*; it says nothing against writing down which report row filed an issue. `/pr-triage` reads this field to show PR number, issue number, and finding ID as three distinct columns, which is otherwise unreconstructable once the source report is regenerated or deleted. Written as-filed and never revised, so a stale value after a report renumber is expected, not a bug. Omitted entirely by `backfill` (a hand-filed issue has no source row, and inferring one would fabricate provenance).
 - **Storage location**: body, for issues this skill creates (it owns the whole body). New comment, for issues `backfill` retrofits (never touches the original human-authored body).
 - **Search**: `gh issue list --search "<file path>" --state all` — includes closed issues, consistent with `backfill` also covering closed issues (a closed "fixed" issue reappearing as a live finding is meaningful signal, not noise to filter out).
 - **Scoring**: for every candidate the file-path search returns, extract keywords from the *new* finding the same way the marker's keywords were originally produced (literal identifiers/symbol names the finding cites, plus a couple of concept terms), then score plain Jaccard overlap (`|intersection| / |union|`) against the candidate's stored keyword list. No embeddings or fuzzy-matching library — deliberately simple and inspectable, since the keywords are literal tokens rather than free prose. Source-independent: a project-review finding and a code-review finding pointing at the same file/symbols should still match each other.
