@@ -77,11 +77,21 @@ Tiebreakers, in order, when blast radius is equal:
 1. **Staleness** — days since `updatedAt`. Older/less-active PRs go earlier: drift compounds whether or not anyone's watching it, so surface it before its rebase gets harder.
 2. **Size** — smaller diffs (`additions + deletions`) go earlier, as a last resort only. Don't let size override blast radius; a small PR with a large blast radius still goes later.
 
+### Linked issue and finding ID lookup
+
+Do this once per PR — both the severity override below and the Phase 5 tables read its results, so don't repeat the `gh` calls later.
+
+1. `gh pr view <N> --json closingIssuesReferences` — catches "Fixes #N" / "Closes #N" in the PR body. Record every linked issue number. A PR with no linked issue is normal, not an error.
+2. `gh issue view <N> --json labels,title,body,comments` for each linked issue. Scan the body and every comment for `/make-issues`' fingerprint marker (`<!-- project-review-finding ... -->`) and read its `finding_id:` line — that's the `F3`-style ID from the `/project-review` report, or the bare ordinal from a `/code-review` report, that filed the issue.
+3. An issue filed by hand, retrofitted by `/make-issues backfill`, or created before the marker carried `finding_id` won't have one. Record it as absent and move on — never infer an ID by matching titles or by re-reading a review report, since a report regenerated since the issue was filed may have renumbered.
+
+Both are provenance for display only — neither feeds the ranking, and a `finding_id` that no longer matches the current report is expected rather than a discrepancy to chase.
+
 ### Severity override
 
 Blast radius optimizes engineering cost (total rework across the queue). A linked issue's severity is a different axis — urgency of delay — and the two can conflict. Don't blend them into one score; use a two-tier structure instead:
 
-1. For each PR, check for linked issues: `gh pr view <N> --json closingIssuesReferences` (catches "Fixes #N" / "Closes #N" in the PR body), then `gh issue view <N> --json labels,title` for each linked issue.
+1. For each PR, use the linked issues and their labels from the lookup above — no second round of `gh` calls.
 2. If any linked issue carries a label indicating critical severity (security, data-loss, crash, or an explicit critical/P0-style label — the exact convention varies by repo, so check what labels this repo actually uses rather than assuming a scheme), that PR is promoted to a **critical tier** ahead of the entire blast-radius-ranked queue, regardless of its own blast radius.
 3. Order the critical tier among itself the same way (blast radius, then tiebreakers) if more than one PR qualifies.
 4. Everything without a critical-severity linked issue stays in the normal blast-radius-ranked pool, unaffected by lower-priority labels (a "P2" or "enhancement" label is not a promotion signal — only genuine urgency is).
@@ -114,17 +124,38 @@ generated: <ISO 8601 timestamp>
 prs:
   - number: 7
     critical: false
+    issues:
+      - number: 42
+        finding: F3
   - number: 8
     critical: true
+    issues:
+      - number: 58
+        finding: F12
   - number: 12
     critical: false
+    issues: []
 ---
 ```
 
-`prs` is an ordered array covering every PR this snapshot tracks, one entry per PR, in the Phase 3/severity-override recommended merge order (order is irrelevant for entries that later merge or close — `list` re-sorts those by resolution date instead, see Phase 0). `critical` on each entry records whether Phase 3's severity override promoted that PR — set it once at write time from Phase 3's own determination, never recomputed from anything else. Entries are never removed from `prs`, even after the PR merges or closes — see Repeat-run mode below for why. Then the body:
+`prs` is an ordered array covering every PR this snapshot tracks, one entry per PR, in the Phase 3/severity-override recommended merge order (order is irrelevant for entries that later merge or close — `list` re-sorts those by resolution date instead, see Phase 0). `critical` on each entry records whether Phase 3's severity override promoted that PR — set it once at write time from Phase 3's own determination, never recomputed from anything else. `issues` records what the Phase 3 lookup found: one entry per linked issue, `[]` when the PR links none, with `finding` omitted for any issue that has no recorded finding ID. Entries are never removed from `prs`, even after the PR merges or closes — see Repeat-run mode below for why. Then the body:
 
-* **Summary table** — columns: `PR # | Title | Author | Linked Issue (severity) | Files Changed | Overlaps With | Blast Radius | Staleness (days) | Size (+/-) | Mergeable? | Suggested Order`.
-* **Recommended merge sequence** — numbered list, one line of rationale per PR (e.g., "merge 3rd: overlaps only with #8, which is already stale and low-priority").
+* **Summary table** — columns: `PR # | Issue # | Finding | Title | Author | Linked Issue Severity | Files Changed | Overlaps With | Blast Radius | Staleness (days) | Size (+/-) | Mergeable? | Suggested Order`.
+* **Recommended merge sequence** — a table, one row per PR in merge order, so the PR number, issue number, and finding ID sit side by side rather than having to be reassembled from the summary table:
+
+  ```markdown
+  | Order | PR # | Issue # | Finding | Title | Rationale |
+  |-------|------|---------|---------|-------|-----------|
+  | 1 | #12 | #58 | F12 | Fix data loss on CSV export | critical tier: data-loss issue #58 jumps the queue |
+  | 2 | #7 | #42 | F3 | Fix login redirect loop | zero overlap with anything else in the queue |
+  | 3 | #8 | — | — | Add rate limiting to /api/upload | overlaps only #7, merged by this point |
+  ```
+
+  Keep the same one-line-of-rationale-per-PR substance the numbered list carried; the table only changes its shape. Formatting rules for the three identifier columns, since conflating them is the failure mode this table exists to prevent:
+
+  - PR and issue numbers keep their `#` prefix; finding IDs stay bare (`F3`, or a bare ordinal for a `/code-review`-sourced issue). Never write `#F3` or a bare PR number.
+  - Use `—` for a PR with no linked issue, and for a linked issue with no recorded finding ID. Never leave a cell blank, and never fill one in by guessing.
+  - A PR linking multiple issues gets them comma-separated in one row (`#42, #51`), with the `Finding` cell listing each one's ID in the same order (`F3, —`).
 * **Severity overrides** — any PR promoted ahead of blast-radius order due to a critical-severity linked issue, naming the issue and which other PRs now bear increased rebase cost as a result. Omit this section entirely (don't write "none") if the repo has no severity-labeled issues linked to any open PR.
 * **Overlap detail** — for each overlapping pair, the Phase 4 classification and reasoning. Incidental-adjacency pairs can be one line; likely-collision pairs get a short explanation of what's actually colliding and why it matters.
 * **Already-conflicting PRs** — any PR GitHub already reports as `CONFLICTING` against the current base, called out separately since these need author action regardless of queue position.
@@ -136,6 +167,7 @@ prs:
 * `clean` and `clean --all` are the only operations that delete anything, and both require showing the candidate list and getting explicit confirmation first — never delete silently, even though these are scratch files.
 * Base blast-radius and overlap claims on the actual file/diff data, not assumption. If `gh` or `git` calls fail (rate limit, auth), say so and stop rather than guessing at PR contents.
 * Keep size and staleness as tiebreakers only — never let them override blast radius in the primary ranking.
+* Never infer an issue number or finding ID that the Phase 3 lookup didn't actually return — `—` is the correct output for "not linked" and "no recorded ID", and a wrong cross-reference is worse than an empty one.
 * Label semantic-collision judgments as judgment calls, not certainty. "Likely collision" and "confirmed collision" are different claims — don't collapse them.
 * Don't pad the overlap detail section with pairs that have zero file overlap; only overlapping pairs get an entry.
 
@@ -143,7 +175,7 @@ prs:
 
 If a file matching the current invocation's scope already exists in `.claude/tmp/pr-triage/` (`PR_TRIAGE.md` for a full run, `PR_TRIAGE-<numbers>.md` for a scoped run), read it first. Mark PRs no longer open as `MERGED` or `CLOSED`, re-rank the remaining queue against the current base, and note which recommendations changed since the last run and why (usually: a merge happened, or a PR was updated). A full-queue run and a scoped run are tracked separately — don't treat one as a substitute for the other's history.
 
-**Full-queue repeat runs** (`PR_TRIAGE.md`) always re-run Phase 1 in full — re-enumerate every currently-open PR rather than trusting the existing file's `prs` array, since a critical PR opened after the last run must not stay invisible until the next fresh (non-repeat) triage. Any PR Phase 1 returns that isn't already in the file's `prs` array is new: give it the full Phase 2–4 treatment (diff, overlap, severity check). For a PR already in `prs`, compare its live `updatedAt` (from this same Phase 1 call) against the file's own frontmatter `generated` timestamp — if `updatedAt` is not later than `generated`, nothing about that PR has changed since this snapshot was written, so skip re-diffing it in Phase 2/4 and reuse its last-known overlap, severity classification, and `critical` flag verbatim — don't recompute any of it. Cost scales with the number of genuinely new or since-updated PRs, not the full queue. One exception: if a newly-processed PR's Phase 2 diff shares a file with a skipped PR, that overlap is new information Phase 2 just discovered — update the skipped PR's blast radius and overlap table entry to reflect it, even though the skipped PR itself wasn't re-diffed.
+**Full-queue repeat runs** (`PR_TRIAGE.md`) always re-run Phase 1 in full — re-enumerate every currently-open PR rather than trusting the existing file's `prs` array, since a critical PR opened after the last run must not stay invisible until the next fresh (non-repeat) triage. Any PR Phase 1 returns that isn't already in the file's `prs` array is new: give it the full Phase 2–4 treatment (diff, overlap, severity check). For a PR already in `prs`, compare its live `updatedAt` (from this same Phase 1 call) against the file's own frontmatter `generated` timestamp — if `updatedAt` is not later than `generated`, nothing about that PR has changed since this snapshot was written, so skip re-diffing it in Phase 2/4 and reuse its last-known overlap, severity classification, `critical` flag, and `issues` entries (linked issue numbers and finding IDs) verbatim — don't recompute any of it, and in particular don't re-run the Phase 3 linked-issue lookup for a PR that hasn't changed. Cost scales with the number of genuinely new or since-updated PRs, not the full queue. One exception: if a newly-processed PR's Phase 2 diff shares a file with a skipped PR, that overlap is new information Phase 2 just discovered — update the skipped PR's blast radius and overlap table entry to reflect it, even though the skipped PR itself wasn't re-diffed.
 
 **Scoped repeat runs** (`PR_TRIAGE-<numbers>.md`) stay locked to the PR numbers already in the file's `prs` array — this mode exists specifically so the user can burn down a chosen subset without new PRs jumping the queue. Don't re-enumerate beyond those numbers.
 

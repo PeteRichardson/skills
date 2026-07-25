@@ -59,6 +59,8 @@ Entries are **never removed** from `prs` once added, even after the PR merges or
 
 There is exactly one existing report file using the old flat-array format; the user will delete it rather than have this design carry backward-compatibility logic for it.
 
+**Later additive change (not part of this design's `list` work):** each `prs` entry also carries an `issues` array (`{number, finding?}` per linked issue, `[]` when none) so the report body's tables can show PR number, issue number, and finding ID as separate columns, and so repeat runs can reuse them for unchanged PRs without re-querying. `list` ignores the field — its output shape below is unchanged.
+
 ### `list` output format
 
 ```
