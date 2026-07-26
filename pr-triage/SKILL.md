@@ -113,7 +113,26 @@ State your confidence and reasoning for each classification. If a pair's overlap
 This project uses `.claude/tmp/` as the shared convention for ephemeral skill output — never `.claude/` broadly, since `.claude/skills/` and `.claude/settings.json` may be intentionally tracked. Each skill gets its own subdirectory so scratch files stay findable and don't collide. Before writing anything:
 
 1. `mkdir -p .claude/tmp/pr-triage`
-2. Check `.gitignore` for a `.claude/tmp/` entry. If absent, append one line: `.claude/tmp/` with a comment noting it's the shared scratch dir for ephemeral Claude Code skill output. This single directory-level entry covers `pr-triage` and every other skill that adopts the convention — don't add per-skill or per-file entries.
+2. Ensure `.claude/tmp/` is ignored — **without modifying any tracked file**:
+
+   ```bash
+   git check-ignore -q .claude/tmp/ || cat >> .git/info/exclude <<'EOF'
+
+   # Added by the Claude Code /pr-triage skill.
+   # Ephemeral skill output. Excluded here rather than in .gitignore so it never
+   # creates a commit diff. `git check-ignore -v <path>` will name this file as
+   # the source. Delete this block to un-ignore.
+   .claude/tmp/
+   EOF
+   ```
+
+   `.git/info/exclude` is per-repo and untracked, so seeding it never appears in `git status` or a commit — that's the whole point. Never write to the tracked `.gitignore`.
+
+   The probe is a silent no-op for anyone with `**/.claude/tmp/` in their global excludes (`git config --global core.excludesFile`), which is the preferred setup.
+
+   **When the fallback actually fires, say so once in the run output** — name the file written and mention that `git check-ignore -v .claude/tmp/` explains the exclusion later. `.git/info/exclude` is an obscure corner of git, and a file that's silently ignored with nothing in either `.gitignore` to explain it is a genuinely confusing thing to hand someone.
+
+   One directory-level entry covers `pr-triage` and every other skill adopting the convention — never add per-skill or per-file entries.
 3. Determine the filename: `PR_TRIAGE.md` for a full-queue run, or `PR_TRIAGE-<numbers>.md` (PR numbers sorted ascending, e.g. `PR_TRIAGE-7-8-12.md`) for a scoped run — so `list` output and the filename itself communicate what each run covered without opening the file.
 
 Then write `.claude/tmp/pr-triage/<filename>`, starting with a YAML frontmatter block so `list` can report status without re-parsing the whole report:
@@ -211,7 +230,15 @@ In Claude Code, in the repo whose PR queue you want triaged:
 /pr-triage
 ```
 
-Output goes to `.claude/tmp/pr-triage/PR_TRIAGE.md` for a full-queue run — this project's shared scratch convention for ephemeral skill output, namespaced per-skill (`pr-triage/`) so it's obvious which skill produced which file when you're browsing `.claude/tmp/`. The skill creates the directory and adds a single `.claude/tmp/` line to `.gitignore` on first run if it's not already there; every skill that adopts this convention shares that one gitignore entry rather than each appending its own. The file persists on disk between sessions, so a repeat `/pr-triage` run picks up where the last one left off (see Repeat-run mode) without ever showing up in `git status` or your commit history.
+Output goes to `.claude/tmp/pr-triage/PR_TRIAGE.md` for a full-queue run — this project's shared scratch convention for ephemeral skill output, namespaced per-skill (`pr-triage/`) so it's obvious which skill produced which file when you're browsing `.claude/tmp/`. The file persists on disk between sessions, so a repeat `/pr-triage` run picks up where the last one left off (see Repeat-run mode) without ever showing up in `git status` or your commit history.
+
+**Recommended one-time setup** — add this to your global excludes file so no repo ever needs seeding:
+
+```bash
+echo '**/.claude/tmp/' >> "$(git config --global core.excludesFile)"
+```
+
+Without it, the skill falls back to appending to `.git/info/exclude` on first run in a repo (never to the tracked `.gitignore`, which would create a commit diff you'd have to carry). If you ever find yourself staring at a file that stubbornly refuses to appear in `git status` with nothing in either `.gitignore` to explain it, `git check-ignore -v <path>` names the exact file and line doing the excluding — including `.git/info/exclude`.
 
 On a queue of 5–10 PRs this should take a few minutes; it scales roughly with the number of overlapping pairs, since those are the ones that need a real diff read in Phase 4.
 
@@ -269,7 +296,13 @@ Blast radius measures engineering cost; issue severity measures urgency of delay
 
 ## The `.claude/tmp/<skill-name>/` convention
 
-This skill writes to `.claude/tmp/pr-triage/` rather than the repo root, and only ever appends one `.gitignore` line (`.claude/tmp/`) for the whole directory rather than one per output file or per skill. This is meant to be a shared convention across your skills ecosystem, not specific to `pr-triage` — any future audit-style skill that generates ephemeral, quickly-stale output can adopt the same boilerplate (`mkdir -p .claude/tmp/<skill-name>`, check-and-append the single shared gitignore line) instead of inventing its own output path and gitignore handling. Worth writing this down once in a `CONVENTIONS.md` in your `claude-skills` repo so it's copy-paste consistent rather than reinvented per skill.
+This skill writes to `.claude/tmp/pr-triage/` rather than the repo root, and never touches a tracked file to do it. This is meant to be a shared convention across your skills ecosystem, not specific to `pr-triage` — any future audit-style skill that generates ephemeral, quickly-stale output can adopt the same two-line boilerplate (`mkdir -p .claude/tmp/<skill-name>`, then `git check-ignore -q .claude/tmp/ || ` append to `.git/info/exclude`) instead of inventing its own output path and ignore handling. Worth writing this down once in a `CONVENTIONS.md` in your `claude-skills` repo so it's copy-paste consistent rather than reinvented per skill.
+
+**Why not the tracked `.gitignore`?** Seeding it means every fresh clone gets an uncommitted one-line diff the moment a skill runs — noise you either commit (polluting history with skill plumbing) or carry indefinitely. `.git/info/exclude` is per-repo and untracked, so the seeding is invisible in exactly the way scratch-file plumbing should be.
+
+**Why not `/tmp` or `$TMPDIR`?** Two reasons. Repeat-run mode depends on snapshots surviving between sessions, and OS temp directories are subject to periodic cleanup by design. And `/tmp` is global while snapshots are per-repo, so it would need path-based namespacing — more machinery than the one-line probe, not less. The `list` and `open` subcommands would also become useless: a macOS `$TMPDIR` looks like `/var/folders/hl/w83dn4nj3cn_vtlyy080957c0000gn/T/`, which is precisely the spelunking those subcommands exist to prevent.
+
+**The one real cost** is that `.git/info/exclude` is obscure — someone can reasonably hunt through both `.gitignore` files and find nothing explaining why a file is ignored. Three mitigations: the appended block carries a comment naming the skill that wrote it, the skill reports the write when the fallback actually fires, and `git check-ignore -v <path>` resolves the question outright by naming the responsible file and line.
 
 The per-skill subdirectory exists specifically so the output is findable without already knowing what you're looking for — a flat `.claude/tmp/` shared across many skills would eventually become exactly the kind of "where did that file go" problem the convention is meant to solve. `list` and `open` subcommands are the other half of that: rather than requiring you to remember the skill name or `cd` into `.claude/tmp/` by hand, the skill can surface its own scratch output on request. If you adopt this pattern elsewhere, consider giving other scratch-producing skills the same two subcommands for the same reason.
 

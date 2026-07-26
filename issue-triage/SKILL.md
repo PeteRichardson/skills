@@ -1,0 +1,285 @@
+---
+name: issue-triage
+description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue, and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, and `/issue-triage clean` [--all]. Called by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. Does not create, close, label, or modify anything — advisory only.
+disable-model-invocation: true
+---
+
+# Issue Triage
+
+A Claude Code skill that looks at a set of open issues and recommends a **fix plan** — not merely an order. Some issues shouldn't be worked at all because another issue moots them; some shouldn't be worked *separately* because they rewrite the same function; some can't be worked yet because they need a decision only the maintainer can make.
+
+When invoked via `/issue-triage`, follow the protocol below. Everything from here through the `---` divider is the protocol Claude executes. The section after the divider is documentation for humans installing or maintaining this skill.
+
+---
+
+## Operating principles
+
+**The output is a disposition per issue, not a ranking.** A linear order cannot express "don't work this one at all" or "work these two as one change," which are the two highest-value things triage produces. Ranking is the last step, applied only to what survives.
+
+**This skill is advisory.** It never creates, closes, labels, comments on, or edits an issue; never creates a branch, worktree, or PR. It reads (`gh issue list`, `gh issue view`, `git log`, source files) and writes under `.claude/tmp/issue-triage/`. Every disposition is a recommendation the user or `/work-issue` acts on — in particular `CLOSE-MOOT` and `DEFER` are proposals requiring confirmation, never actions.
+
+**Deferral is the maintainer's call, not this skill's.** Proposing that an issue be deferred is useful; applying a `backlog` label is a priority decision belonging to the user. This skill proposes; it never labels.
+
+**Axes stay separate.** Dependency order, severity, and effort are three different things. Never blend them into a score — tier them, and state the tradeoff in prose when they conflict. (Same reasoning as `/pr-triage`'s severity-vs-blast-radius tiering.)
+
+## Phase 0: Subcommands
+
+Check the invocation before doing anything else:
+
+* **`/issue-triage list`** — for every file in `.claude/tmp/issue-triage/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`units`, `generated`) rather than the full report. Then make **one** `gh issue list --state all --json number,state,title,url,closedAt` call covering the union of every issue number across all files, and classify each file's issues against that single result — don't make a separate API call per file.
+
+  For each file, print the filename, its `generated` timestamp, and its resolved absolute path on one line, then two groups below it:
+
+  ```
+  ISSUE_TRIAGE.md  (generated 2026-07-26 15:04)  /Users/pete/project/.claude/tmp/issue-triage/ISSUE_TRIAGE.md
+      1  #18, #19  ‼ set_field: precedence + agreement      https://github.com/org/repo/issues/18
+      2  #11, #15    SPARQL retry set + Retry-After         https://github.com/org/repo/issues/11
+      ?  #12         Rating priority (NEEDS-DECISION)       https://github.com/org/repo/issues/12
+      ---
+      #20    Sloop-of-war era filter    closed 2026-07-26   https://github.com/org/repo/issues/20
+  ```
+
+  - **Outstanding** (issues the live result doesn't report as `CLOSED`): one line per work unit, in `units` array order, prefixed with its order number — or `?` for a unit whose disposition is `NEEDS-DECISION` or `DEFER`, which have no position in the sequence. Prefix with `‼` when the unit's frontmatter `critical` is `true`. No color — plain text only.
+  - A `---` separator line, only if both groups are non-empty.
+  - **Closed**: one line per issue, newest `closedAt` first, ending with `closed <date>`.
+  - Each line ends with the issue's plain `url` from the live result — plain text, not a rendered hyperlink.
+
+  Sort files newest-generated first (from frontmatter `generated`, not file mtime). Stop here; don't run a triage.
+* **`/issue-triage open`** — run `open .claude/tmp/issue-triage/` (macOS). If `open` isn't available, print the absolute path. Stop here.
+* **`/issue-triage clean`** — read every file's frontmatter issue numbers, make one `gh issue list --state all --json number,state` call covering the union. Any file whose entire issue set is now closed is a removal candidate. Show candidates plus what's being kept and why, and ask for confirmation before deleting. Stop here.
+* **`/issue-triage clean --all`** — unconditional wipe of `.claude/tmp/issue-triage/`. Show what will be deleted, ask for confirmation. Stop here.
+* **`/issue-triage`** (no args) — full-queue run, proceed to Phase 1.
+* **`/issue-triage #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
+* **Called by `/work-issue` batch mode** — the caller supplies an already-filtered candidate set. Skip Phase 1's own filtering, use the supplied set verbatim, and proceed to Phase 2. Still write the snapshot.
+
+## Phase 1: Enumerate the eligible set
+
+1. Confirm the repo.
+2. `gh issue list --state open --limit 200 --json number,title,body,comments,labels,createdAt,updatedAt,url`
+3. **Exclude already-deferred issues.** Any issue carrying `backlog`, `icebox`, `someday`, `someday-maybe`, `future`, `deferred`, `on hold`, `wontfix`, or a `priority/backlog`-style namespaced equivalent is out of scope — that decision is already made. List them once as excluded, with the label that fired, so a mislabelled issue stays visible. This vocabulary is shared with `/work-issue`'s Phase 1 deferral check; keep the two lists in sync.
+4. **Exclude already-addressed issues** using `/work-issue`'s Phase 2 checks: an open PR whose `closingIssuesReferences` names it, a PR `headRefName` matching `(^|-)I?<n>(-|$)`, or a local/remote branch matching the same pattern. Report each with which check fired.
+5. **Read the `/make-issues` fingerprint** for each surviving issue — scan the body and every comment for `<!-- project-review-finding ... -->` and extract `file:`, `category:`, `keywords:`, and `finding_id:` if present. This is the cheapest source of the file-overlap signal Phase 2 needs, and issues carrying it need no code reading to place. Absent is normal (hand-filed, or `backfill`-retrofitted without one) — fall back to reading the issue text for cited paths and symbols. Never infer a `finding_id` that isn't recorded.
+
+## Phase 2: Build the relationship graph
+
+For every pair of surviving issues, determine which of these edges hold. Each requires different evidence; don't collapse them.
+
+* **`OVERLAPS`** — both issues change the same file. From the fingerprint `file:` field where present, otherwise from paths cited in the issue text. Verify the path still exists; an issue filed against a since-renamed file is stale, and the *current* path is what matters. Pure set intersection, no judgment yet.
+* **`COLLIDES`** — both issues change the same *function or symbol*, not merely the same file. This requires actually opening the source and locating what each issue proposes to change. `OVERLAPS` without `COLLIDES` is incidental adjacency (two issues adding separate functions to one module) and does **not** justify grouping.
+* **`DEPENDS-ON`** — issue A cannot be correctly implemented before issue B lands. Two sources: declared (scan issue bodies and comments for "depends on #N", "blocks #N", "prerequisite", "should land before #N") and semantic (A's fix is only well-defined given B's design decision). Declared dependencies are facts; semantic ones are judgment calls and must be labelled as such.
+* **`MOOTS`** — fixing B makes A unnecessary, not merely easier. A high bar: B must remove the condition A describes, not just touch the same code. If B merely makes A smaller, that is `COLLIDES`, not `MOOTS`.
+* **`DUPLICATES`** — A and B describe the same defect, filed twice.
+
+Record the evidence for each edge. An edge asserted without evidence is the failure mode this phase exists to prevent.
+
+## Phase 3: Assign a disposition
+
+Every issue gets exactly one. Apply in this order — earlier dispositions win:
+
+| Disposition | Assign when | Effect |
+|---|---|---|
+| `CLOSE-MOOT` | A `MOOTS` or `DUPLICATES` edge points at it | Recommend closing with a comment naming the superseding issue. **Never worked.** |
+| `NEEDS-DECISION` | The issue's own text says a policy/domain decision is required, or its fix has materially different valid outcomes the issue doesn't choose between | Pulled out of the sequence. The user decides before any code is written. |
+| `GROUP` | It `COLLIDES` with one or more other issues | Combined with them into **one** work unit → one branch, one PR closing all of them. |
+| `DEFER` | It is genuinely speculative, blocked on absent data, or scoped as a future idea | Proposed as a `backlog` candidate. **Never labelled by this skill.** |
+| `WORK` | Everything else | Worked on its own, in sequence position n. |
+
+`NEEDS-DECISION` outranks `GROUP` deliberately: a decision issue must not be silently absorbed into a grouped PR where the decision gets made as an implementation detail.
+
+A **work unit** is one `WORK` issue or one `GROUP` set. Units, not issues, are what Phase 4 orders and what `/work-issue` turns into branches.
+
+## Phase 4: Order the work units
+
+Rank only `WORK` and `GROUP` units. `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` have no position.
+
+1. **Dependency order first.** Topologically sort on `DEPENDS-ON`. This is a hard constraint, not a preference — it outranks everything below. Report a cycle rather than breaking it arbitrarily.
+2. **Severity tier.** Within what the dependency order leaves free, `severity: Critical` then `High` before `Medium`/`Low`. Read severity from labels; if the repo has no severity labels, say so once and skip this step rather than inventing a scheme.
+3. **Effort tiebreaker.** `effort: S` before `M` before `L`, so the queue shrinks fastest. Never let effort override severity or dependency.
+
+When severity and dependency conflict — a High-severity issue that must wait on a Medium one — state it in prose in the deliverable rather than hiding it in the ordering.
+
+## Phase 5: Deliverable
+
+This project uses `.claude/tmp/` as the shared convention for ephemeral skill output, namespaced per-skill. Before writing anything:
+
+1. `mkdir -p .claude/tmp/issue-triage`
+2. Ensure `.claude/tmp/` is ignored — **without modifying any tracked file**:
+
+   ```bash
+   git check-ignore -q .claude/tmp/ || cat >> .git/info/exclude <<'EOF'
+
+   # Added by the Claude Code /issue-triage skill.
+   # Ephemeral skill output. Excluded here rather than in .gitignore so it never
+   # creates a commit diff. `git check-ignore -v <path>` will name this file as
+   # the source. Delete this block to un-ignore.
+   .claude/tmp/
+   EOF
+   ```
+
+   `.git/info/exclude` is per-repo and untracked, so seeding it never appears in `git status` or a commit — that's the whole point. Never write to the tracked `.gitignore`.
+
+   The probe is a silent no-op for anyone with `**/.claude/tmp/` in their global excludes (`git config --global core.excludesFile`), which is the preferred setup.
+
+   **When the fallback actually fires, say so once in the run output** — name the file written and mention that `git check-ignore -v .claude/tmp/` explains the exclusion later. `.git/info/exclude` is an obscure corner of git, and a file that's silently ignored with nothing in either `.gitignore` to explain it is a genuinely confusing thing to hand someone.
+
+   One directory-level entry covers every skill adopting the convention — never add per-skill entries.
+3. Filename: `ISSUE_TRIAGE.md` for a full run, or `ISSUE_TRIAGE-<numbers>.md` (issue numbers ascending) for a scoped run.
+
+Write `.claude/tmp/issue-triage/<filename>` with YAML frontmatter so `list` can report status without parsing the body:
+
+```yaml
+---
+generated: <ISO 8601 timestamp>
+units:
+  - order: 1
+    disposition: GROUP
+    critical: false
+    issues:
+      - number: 18
+        finding: F7
+      - number: 19
+        finding: ~
+  - order: 2
+    disposition: WORK
+    critical: false
+    issues:
+      - number: 14
+        finding: ~
+  - order: ~
+    disposition: NEEDS-DECISION
+    critical: false
+    issues:
+      - number: 12
+        finding: ~
+---
+```
+
+`units` is ordered by `order`, with unordered dispositions (`NEEDS-DECISION`, `DEFER`, `CLOSE-MOOT`) last, carrying `order: ~`. `finding: ~` means no recorded finding ID — never guess one. Entries are never removed after an issue closes; see Repeat-run mode.
+
+Then the body:
+
+* **Work plan** — one row per unit, in order:
+
+  ```markdown
+  | Order | Issues | Finding | Disposition | Title | Rationale |
+  |-------|--------|---------|-------------|-------|-----------|
+  | 1 | #18, #19 | F7, — | GROUP | set_field precedence + agreement | both rewrite set_field; #19 undefined without #18's precedence |
+  | 2 | #14 | — | WORK | Stable ship ids | severity High, no overlap with anything open |
+  | — | #12 | — | NEEDS-DECISION | Rating priority | issue says "a real domain decision"; not codeable as filed |
+  ```
+
+  Identifier formatting, since conflating the three spaces is the failure mode this table prevents: issue numbers keep `#`; finding IDs stay bare (`F3`, or a bare ordinal from `/code-review`); use `—` for absent, never a blank cell, never a guess.
+* **Grouping detail** — for each `GROUP` unit, what specifically collides (file, function, why separate PRs would conflict) and the suggested combined branch slug.
+* **Decisions needed** — for each `NEEDS-DECISION`, the question stated plainly and the options the issue itself names. This section is the one the user acts on first; make it answerable without opening the issue.
+* **Proposed deferrals** — each `DEFER` with its reason, phrased as a recommendation. State explicitly that no label has been applied.
+* **Proposed closures** — each `CLOSE-MOOT`, naming the superseding issue and the evidence. State explicitly that nothing has been closed.
+* **Relationship graph** — the Phase 2 edges with their evidence. Skip pairs with no edge; don't pad.
+* **Open questions** — edges you couldn't classify confidently, ambiguous dependencies, anything needing maintainer judgment.
+
+## Rules
+
+* Never create, close, label, comment on, or edit an issue. Never create a branch, worktree, or PR. This skill only reads and writes under `.claude/tmp/issue-triage/`.
+* `clean` and `clean --all` are the only operations that delete anything; both require showing candidates and getting explicit confirmation.
+* Base `COLLIDES` claims on actually reading the source, not on file paths alone. `OVERLAPS` is cheap and mechanical; `COLLIDES` is not, and asserting it without opening the code is the main way this skill can produce a wrong grouping.
+* Label `MOOTS` and semantic `DEPENDS-ON` as judgment calls. "Likely moots" and "moots" are different claims — don't collapse them. When in doubt, leave the issue as `WORK` and raise it in Open questions; a wrongly-closed issue costs more than a redundant PR.
+* Never infer a finding ID, issue number, or dependency the evidence didn't produce. `—` is correct output for absent.
+* Never propose `DEFER` for an issue describing a defect in shipped code. Deferral is for speculative or future-scoped work, not for bugs that are merely inconvenient.
+* Keep effort a tiebreaker only. Never let it override severity or dependency order.
+* If `gh` fails (auth, rate limit) or an issue number doesn't exist, stop and report. No silent retries, no guessing at issue contents.
+
+## Repeat-run mode
+
+If a file matching the current scope already exists, read it first. Mark issues no longer open as `CLOSED`, re-triage the remainder, and note which dispositions changed since the last run and why (usually: an issue was fixed, a decision was made, or a label changed).
+
+**Full-queue repeat runs** always re-run Phase 1 in full — a high-severity issue filed since the last run must not stay invisible. For an issue already in `units` whose live `updatedAt` is not later than the file's `generated` timestamp, reuse its recorded fingerprint data, edges, and disposition verbatim rather than recomputing. One exception: if a newly-processed issue's Phase 2 analysis produces an edge touching a skipped issue, that edge is new information — update the skipped issue's entry, and re-check whether its disposition should change (a new `COLLIDES` edge can turn a `WORK` into a `GROUP`).
+
+**Scoped repeat runs** stay locked to the issue numbers already in the file's `units` array.
+
+---
+
+# Project documentation
+
+Everything below is for humans installing, using, or contributing to this skill. It is not part of the triage protocol.
+
+## Installation
+
+Personal install (available across all your projects):
+
+```bash
+mkdir -p ~/.claude/skills/issue-triage
+# copy this file to ~/.claude/skills/issue-triage/SKILL.md
+```
+
+Requires the `gh` CLI, authenticated (`gh auth status`) with read access to the target repo.
+
+## Usage
+
+```
+/issue-triage                  # full open queue
+/issue-triage #11 #15 #18      # scoped to a subset
+/issue-triage list             # past snapshots at a glance
+/issue-triage open             # open the snapshot folder (macOS)
+/issue-triage clean [--all]    # tidy up old snapshots
+```
+
+Output goes to `.claude/tmp/issue-triage/ISSUE_TRIAGE.md`, the shared per-skill scratch convention. It persists between sessions so repeat runs can report what changed, and never enters version control.
+
+**Recommended one-time setup** — add this to your global excludes file so no repo ever needs seeding:
+
+```bash
+echo '**/.claude/tmp/' >> "$(git config --global core.excludesFile)"
+```
+
+Without it, the skill falls back to appending to `.git/info/exclude` on first run in a repo — never to the tracked `.gitignore`, which would create a commit diff you'd have to carry. That fallback is per-repo and invisible in `git status`, which is the point, but it's also an obscure corner of git: if you ever find a file that refuses to show up in `git status` with nothing in either `.gitignore` to explain it, `git check-ignore -v <path>` names the exact file and line responsible.
+
+## Why a disposition per issue instead of a ranked list
+
+The original framing of this skill was "recommend a fix order." That framing can't express the two most valuable things triage finds.
+
+The first is **an issue that shouldn't be worked at all** — if fixing B makes A moot, A's correct position in the order is "nowhere," and the correct action is to close it with a comment. A ranking has no way to say that.
+
+The second is **two issues that shouldn't be worked separately**. When two issues rewrite the same function, working them as consecutive items in an order is actively worse than working them together: each branch is cut from `main`, so the second PR conflicts with the first by construction, and if one issue's fix is only well-defined given the other's design decision, the first PR embodies a decision the second one then has to revisit. Grouping collapses both problems.
+
+Ordering is real, but it's the last and least interesting step — applied only to what survives triage.
+
+## Why `NEEDS-DECISION` exists
+
+An issue that says "this requires a policy decision" is not implementable as filed, but it looks exactly like every other issue to an automated batch run. Without this disposition, `/work-issue all` will happily invent the policy, and the maintainer discovers what was decided by reading a PR. Pulling these out of the sequence and surfacing the question — with the options the issue itself already listed — costs one round-trip and prevents a class of work that has to be redone.
+
+## Why this skill never applies the `backlog` label
+
+Proposing a deferral and enacting one are different acts. `backlog` records a maintainer's decision that something isn't worth doing now; a skill that applies it is making that decision instead of surfacing it. `/work-issue`'s own rules already say deciding what's worth doing now is the user's call — this skill is the thing that makes the call *easy*, by arriving with a short list and reasons, not the thing that makes it unilaterally.
+
+The same logic applies more strongly to `CLOSE-MOOT`: closing an issue destroys queue state on a judgment call that can be wrong. Both are proposals.
+
+## How this fits with your other skills
+
+The intended loop:
+
+1. `/project-review` or `/code-review` — find the work
+2. `/make-issues` (or `backfill`) — file it, with labels and fingerprints
+3. `/issue-triage` — decide what to work, in what order, what to combine, what to drop
+4. `/work-issue all` — execute the plan (it calls this skill for its ordering)
+5. `/pr-triage` — order the resulting PR queue
+6. Merge manually in the recommended order
+
+Step 3 replaces what used to be a manual pass of labelling things `backlog` by hand.
+
+There's a real synergy with `/make-issues`: the fingerprint marker it writes carries a `file:` field, which is exactly the file-overlap signal Phase 2 needs. On a repo where every issue has been through `/make-issues` or `backfill`, most of Phase 2 is free. On a repo of hand-filed issues, Phase 2 has to read issue prose instead, and its `OVERLAPS` edges are correspondingly less reliable.
+
+## Why file overlap alone doesn't justify grouping
+
+`OVERLAPS` (same file) over-flags badly on any repo with a few large modules — in a codebase where half the issues touch one model file, grouping on file overlap would collapse the entire queue into one PR. `COLLIDES` (same function or symbol) is the signal that actually predicts a conflict, and it's the only one that justifies combining issues. The cost is that `COLLIDES` can't be computed from metadata; it requires opening the source. That's a deliberate trade — the cheap signal is kept as a filter that narrows what needs the expensive check.
+
+This mirrors `/pr-triage`'s Phase 2/Phase 4 split for the same reason.
+
+## Limitations
+
+- `MOOTS` detection is a judgment call over issue prose, and prose is often optimistic about what a fix will cover. The skill is deliberately biased toward leaving an issue as `WORK` and raising the question, since a wrongly-closed issue is a worse error than a redundant PR.
+- Dependencies that nobody wrote down and that aren't visible in the code are invisible here. Declared dependencies are only as good as the issue text.
+- This skill doesn't read PR diffs — that's `/pr-triage`'s job, downstream. It reasons about issues and source, not about work in flight beyond the "already addressed" filter.
+- Severity ordering depends on the repo having severity labels. On a repo without them, ordering falls back to dependency plus effort, which is weaker.
+
+## License
+
+Original, written for Peter's personal skills ecosystem. Freely modifiable.

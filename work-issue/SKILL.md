@@ -27,7 +27,17 @@ PR68-Fix-I60-F3-rust-ps-path
 - `F<n>` — the finding ID from a `/project-review` or `/code-review` report, if the issue records one. Omitted entirely when it doesn't — `PR71-Fix-I63-rust-shell-quote`, no empty segment.
 - Slug — 2–4 words from the issue title, lowercased, `[a-z0-9-]` only, ≤ 32 chars.
 
-Two names exist per issue:
+**Grouped units** — when `/issue-triage` returns a `GROUP` disposition, several issues share one branch and one PR. Every issue number appears, ascending, each with its own `I` prefix; finding IDs follow in the same order, and are omitted entirely if none of the issues has one:
+
+```
+PR22-Fix-I11-I15-sparql-retry-set
+         └──┘└──┘ └─────────────┘
+        both issue numbers   slug describing the combined change
+```
+
+The slug describes what the *unit* does, not any one issue's title — a combined branch has no single title to derive from. The PR body carries one `Fixes #<n>` line per issue so GitHub closes all of them on merge. Everything else about the scheme is unchanged.
+
+Two names exist per unit:
 
 | | Name | Lives on |
 |---|---|---|
@@ -40,14 +50,16 @@ They differ on purpose and permanently. The PR number doesn't exist until the br
 
 * **`/work-issue <n>`** — one issue. Proceed to Phase 1.
 * **`/work-issue all`**, or any "for each open issue that isn't already addressed by a PR" phrasing — batch mode, see Batch mode below.
+* **`/work-issue <n> <m> ...`** — several issue numbers. Run `/issue-triage #<n> #<m> ...` scoped to exactly those, then execute the plan it returns. This is batch mode over a hand-picked set, not a series of independent single runs — the numbers may turn out to belong in one grouped PR.
 * **`/work-issue <description>`** with no issue number — stop. The branch format requires `I<n>`, and an issue is the durable record this whole flow hangs off. Offer to file the issue first (`gh issue create`, or `/make-issues` if it came from a review report), then re-invoke with the number.
 
 ## Phase 1: Resolve the issue and compute both names
 
 1. `gh issue view <n> --json number,title,state,body,comments,labels,url`. Stop if the issue is closed — say so rather than working it anyway.
-2. **Finding ID** — scan the issue body and every comment for `/make-issues`' fingerprint marker (`<!-- project-review-finding ... -->`) and read its `finding_id:` line. Absent for hand-filed issues, `backfill`-retrofitted issues, and issues filed before the marker carried the field. Absent is normal: drop the `F<n>` segment. **Never infer an ID** by matching the issue against a review report — a report regenerated since filing may have renumbered.
-3. **Slug** — from the issue title: lowercase, strip punctuation and filler words (a, the, in, on, when, should), keep the 2–4 most specific words, join with `-`, truncate to 32 chars at a word boundary.
-4. Compose the working name and the final-name template. Show both to the user before creating anything.
+2. **Deferred?** — stop if any label in `DEFERRAL_LABELS` is present: `backlog`, `icebox`, `someday`, `someday-maybe`, `future`, `deferred`, `on hold`, `wontfix`, or any `priority/backlog`-style namespaced equivalent. These mark work that is deliberately remembered but not scheduled; opening a PR against one makes a prioritization decision the label records as unmade. Report which label fired and offer to proceed anyway — a user who types the number themselves may well mean it, but the override must be theirs, not an assumption.
+3. **Finding ID** — scan the issue body and every comment for `/make-issues`' fingerprint marker (`<!-- project-review-finding ... -->`) and read its `finding_id:` line. Absent for hand-filed issues, `backfill`-retrofitted issues, and issues filed before the marker carried the field. Absent is normal: drop the `F<n>` segment. **Never infer an ID** by matching the issue against a review report — a report regenerated since filing may have renumbered.
+4. **Slug** — from the issue title: lowercase, strip punctuation and filler words (a, the, in, on, when, should), keep the 2–4 most specific words, join with `-`, truncate to 32 chars at a word boundary.
+5. Compose the working name and the final-name template. Show both to the user before creating anything.
 
 ## Phase 2: Is this issue already addressed?
 
@@ -57,7 +69,7 @@ Run all three checks — each catches work the others miss. Any hit means **stop
 2. **PR head ref naming it** — from the same result, any `headRefName` matching `(^|-)I?<n>(-|$)`. Catches PRs that reference the issue in prose but never linked it.
 3. **Local or remote branch naming it** — `git branch -a` with the same pattern. Catches in-flight work that has no PR yet, and abandoned half-finished branches. This is the cheapest durable signal: a branch persists regardless of PR state or whether any session is still running.
 
-In batch mode these three checks *are* the "not already addressed by a PR" filter — run them per issue, and report each skip with which check fired.
+In batch mode these three checks *are* the "not already addressed by a PR" filter — run them per issue, and report each skip with which check fired. They compose with Phase 1's deferral check: a batch run skips deferred issues *and* already-addressed ones, and reports the two groups separately, since one is a scheduling decision and the other is a duplicate-work guard.
 
 ## Phase 3: Create the worktree
 
@@ -113,11 +125,31 @@ gh pr checkout 68 --branch PR68-Fix-I60-F3-rust-ps-path                         
 
 For "every open issue not already addressed by a PR":
 
-1. `gh issue list --state open --json number,title,labels` for the candidate set.
+1. Get the candidate set, excluding deferred issues:
+
+   ```bash
+   gh issue list --state open --limit 200 --json number,title,labels \
+     --jq '.[] | select(.labels | map(.name) | any(. == "backlog" or . == "icebox" or . == "someday" or . == "future" or . == "deferred" or . == "on hold" or . == "wontfix") | not)'
+   ```
+
+   Filter client-side like this rather than with `--search '-label:backlog'`. Both work, but GitHub's search index is eventually consistent — an issue labelled seconds ago can still come back from `--search`, which is exactly the race a loop that labels and re-queries will hit. `--jq` reads the issues API directly and is immediately correct. Note also that `--label` is include-only; there is no `--exclude-label` flag.
+
+   Report the excluded issues by number and title. A deferred issue that silently never appears reads as "nothing left to do" when the truth is "you decided not to do these" — and a mistakenly-labelled issue would otherwise stay invisible forever.
 2. Run Phase 2's three checks per issue; report the skips as a list with the reason each fired.
-3. Run Phases 1 and 3–6 on each surviving issue **sequentially** — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
-4. A failure on one issue doesn't abort the run. Record it, move to the next, and end with a table: issue, PR (or the failure reason), final branch name, worktree removed y/n.
-5. Before starting a batch of more than ~3 issues, list what will be worked and confirm. Each iteration opens a real PR.
+3. **Order the queue with `/issue-triage`.** Pass the surviving candidate set to it and use the plan it returns. Run it fresh every time — never read a previous `.claude/tmp/issue-triage/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
+
+   | Disposition | What batch mode does |
+   |---|---|
+   | `WORK n` | Work it alone, at position n. |
+   | `GROUP` | Work all its issues on **one** worktree, one branch, one PR — see the grouped-unit naming above. Never split a group into consecutive single runs; the second branch would be cut from `main` and conflict with the first by construction. |
+   | `NEEDS-DECISION` | **Halt and ask.** Present the question and the options the issue names. Do not implement, do not guess, do not skip silently. |
+   | `DEFER` | Report as a deferral proposal and skip. Never apply the label. |
+   | `CLOSE-MOOT` | Report the proposal with its evidence and skip. Never close the issue. |
+
+   If `/issue-triage` is unavailable, fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
+4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
+5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
+6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit opens a real PR.
 
 ## Rules
 
@@ -126,6 +158,9 @@ For "every open issue not already addressed by a PR":
 * Never rename or force-push the remote branch to match the local one, and never try to repoint an open PR's head. The two names differing is the design, not a defect.
 * Never invent a finding ID or an issue number. An absent `F<n>` segment is correct output; a wrong one is worse than none.
 * One worktree per issue. If Phase 2 says the issue is already covered, stop — don't create a parallel attempt.
+* Never implement a `NEEDS-DECISION` issue by choosing the policy yourself. The whole point of the disposition is that the choice reaches the user before code exists.
+* Never act on `/issue-triage`'s `CLOSE-MOOT` or `DEFER` proposals — report them. Closing an issue or deferring one is a mutation on a judgment call; triage is advisory and so is this skill's handling of it.
+* Never work a deferred issue in batch mode, and never strip a deferral label to make an issue eligible. Deciding something is worth doing now is the user's call; the label is that decision already recorded. A single explicit `/work-issue <n>` may override it, but only after asking.
 * Stop and report rather than guess when `gh` fails (auth, rate limit) or the issue number doesn't exist. No silent retries.
 
 ---
