@@ -1,6 +1,6 @@
 ---
 name: issue-triage
-description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue, and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, and `/issue-triage clean` [--all]. Called by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. Does not create, close, label, or modify anything — advisory only.
+description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue, and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, and `/issue-triage clean` [--all]. Its Phases 2-5 are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. Does not create, close, label, or modify anything — advisory only.
 disable-model-invocation: true
 ---
 
@@ -50,7 +50,7 @@ Check the invocation before doing anything else:
 * **`/issue-triage clean --all`** — unconditional wipe of `.claude/tmp/issue-triage/`. Show what will be deleted, ask for confirmation. Stop here.
 * **`/issue-triage`** (no args) — full-queue run, proceed to Phase 1.
 * **`/issue-triage #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
-* **Called by `/work-issue` batch mode** — the caller supplies an already-filtered candidate set. Skip Phase 1's own filtering, use the supplied set verbatim, and proceed to Phase 2. Still write the snapshot.
+* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5 directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
 
 ## Phase 1: Enumerate the eligible set
 
@@ -259,7 +259,7 @@ The intended loop:
 1. `/project-review` or `/code-review` — find the work
 2. `/make-issues` (or `backfill`) — file it, with labels and fingerprints
 3. `/issue-triage` — decide what to work, in what order, what to combine, what to drop
-4. `/work-issue all` — execute the plan (it calls this skill for its ordering)
+4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5 as a sub-protocol to order its queue)
 5. `/pr-triage` — order the resulting PR queue
 6. Merge manually in the recommended order
 

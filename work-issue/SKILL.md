@@ -50,7 +50,7 @@ They differ on purpose and permanently. The PR number doesn't exist until the br
 
 * **`/work-issue <n>`** — one issue. Proceed to Phase 1.
 * **`/work-issue all`**, or any "for each open issue that isn't already addressed by a PR" phrasing — batch mode, see Batch mode below.
-* **`/work-issue <n> <m> ...`** — several issue numbers. Run `/issue-triage #<n> #<m> ...` scoped to exactly those, then execute the plan it returns. This is batch mode over a hand-picked set, not a series of independent single runs — the numbers may turn out to belong in one grouped PR.
+* **`/work-issue <n> <m> ...`** — several issue numbers. Enter batch mode scoped to exactly those, using the `issue-triage` protocol per step 3 below. This is batch mode over a hand-picked set, not a series of independent single runs — the numbers may turn out to belong in one grouped PR.
 * **`/work-issue <description>`** with no issue number — stop. The branch format requires `I<n>`, and an issue is the durable record this whole flow hangs off. Offer to file the issue first (`gh issue create`, or `/make-issues` if it came from a review report), then re-invoke with the number.
 
 ## Phase 1: Resolve the issue and compute both names
@@ -136,7 +136,9 @@ For "every open issue not already addressed by a PR":
 
    Report the excluded issues by number and title. A deferred issue that silently never appears reads as "nothing left to do" when the truth is "you decided not to do these" — and a mistakenly-labelled issue would otherwise stay invisible forever.
 2. Run Phase 2's three checks per issue; report the skips as a list with the reason each fired.
-3. **Order the queue with `/issue-triage`.** Pass the surviving candidate set to it and use the plan it returns. Run it fresh every time — never read a previous `.claude/tmp/issue-triage/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
+3. **Order the queue using the `issue-triage` protocol.** Read `~/.claude/skills/issue-triage/SKILL.md` and execute its Phases 2–5 against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Do **not** try to invoke it through the Skill tool — `issue-triage` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/issue-triage` or by reading its protocol file directly, which is what this step does.
+
+   Run it fresh every time — never read a previous `.claude/tmp/issue-triage/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
 
    | Disposition | What batch mode does |
    |---|---|
@@ -146,7 +148,7 @@ For "every open issue not already addressed by a PR":
    | `DEFER` | Report as a deferral proposal and skip. Never apply the label. |
    | `CLOSE-MOOT` | Report the proposal with its evidence and skip. Never close the issue. |
 
-   If `/issue-triage` is unavailable, fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
+   If `~/.claude/skills/issue-triage/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
 4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
 5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
 6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit opens a real PR.
