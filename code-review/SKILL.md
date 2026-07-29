@@ -237,7 +237,19 @@ scope: src/
 ## Summary
 - Total files scanned: N
 - Next step: Pick one issue by name and ask "Let's fix [issue name]"
+- Or file them all: `/make-issues docs/reviews/code-review_[SCOPE]_[DATE].md`
 ```
+
+## Next in the pipeline
+
+This skill is stage 1 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`), alongside `/project-review`. After displaying the report, print the next step as the last line:
+
+> Next: fix one now ("Let's fix [issue name]"), or `/make-issues docs/reviews/code-review_src_2026-07-21.md` to file the whole report as GitHub issues.
+
+Use the real report path, not a placeholder — `/make-issues` needs it verbatim, since only `/project-review`'s report has a default path. Vary it only for these cases:
+
+* **No GitHub remote** — omit the `/make-issues` half; the fix-one-now path still applies.
+* **`--focus idiom` run** — mention that IDIOM findings carry a derived severity, so they order alongside everything else once filed rather than landing in a separate bucket.
 
 ## When to use
 

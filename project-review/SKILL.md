@@ -123,6 +123,17 @@ Write to `docs/reviews/PROJECT_REVIEW.md` with this structure:
 * **Things that look bad but are actually fine** — calls you considered flagging and chose not to, with reasoning. **This section is required.** If it's empty, you didn't look hard enough.
 * **Open questions for the maintainer** — things you couldn't tell were debt vs. intentional.
 
+## Next in the pipeline
+
+This audit is stage 1 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line, so the report doesn't just sit there:
+
+> Next: `/make-issues` to file the Medium+ findings as GitHub issues (`--all` to include Low).
+
+Vary it only for these cases:
+
+* **No GitHub remote** (`git remote -v` is empty or non-GitHub) — omit the line entirely rather than recommending a command that can't run. Say the findings are worked directly off the report.
+* **A subsystem came out badly** — add a second line suggesting `/code-review <that path>` for line-level depth this audit deliberately doesn't restate.
+
 ## Rules
 
 * Cite `file:line` for every concrete finding.

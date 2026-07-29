@@ -144,6 +144,18 @@ This is a **baseline, not a closed set** — matches `/project-review`'s own now
    -->
    ```
 
+## Next in the pipeline
+
+This skill is stage 2 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line:
+
+> Next: `/issue-triage` to decide what to work, in what order, and what to combine.
+
+Vary it only for these cases:
+
+* **A `backfill` run** — same line, but note that triage is now meaningfully cheaper on this repo: the fingerprints just written are the file-overlap signal its Phase 2 reads.
+* **Fewer than ~3 issues created and none share a file** — say triage is optional at this size and `/work-issue <n>` directly is reasonable. Still mention it if any two do share a file; that's the case grouping exists for.
+* **Nothing was created** (everything deduped to existing issues) — recommend `/issue-triage` anyway. The queue is unchanged, not empty.
+
 ## Rules
 
 - Never edit an issue's original body unless this skill created that issue in this same run.

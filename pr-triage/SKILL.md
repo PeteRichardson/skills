@@ -180,6 +180,18 @@ prs:
 * **Already-conflicting PRs** — any PR GitHub already reports as `CONFLICTING` against the current base, called out separately since these need author action regardless of queue position.
 * **Open questions** — overlaps you couldn't classify confidently, PRs with unclear base commits, or anything needing the maintainer's judgment.
 
+## Next in the pipeline
+
+This skill is stage 5 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). Stage 6 — the merge itself — is deliberately manual and is not this skill's to run. End the run by printing the next step as the last line, naming the actual PR at position 1:
+
+> Next: review and merge #12 yourself, then re-run `/pr-triage` — every merge invalidates the rest of this order.
+
+The re-run half is not optional boilerplate: a user working down a printed list without re-ranking is the specific failure this line exists to prevent. Vary it only for these cases:
+
+* **PR #1 hasn't had a line-level review** — put that first: `/code-review` (or `/review`) on that PR, then merge.
+* **PR #1 is already `CONFLICTING`** — say so; it needs author action before merging regardless of its position, and the next mergeable PR in the order is the real next step.
+* **A single-PR queue** — no order to work down. Say it's ready to review and merge, and skip the re-run line.
+
 ## Rules
 
 * Never merge, push, rebase, or force-push anything — this skill only reads (`gh pr list`, `gh pr diff`, `git log`) and writes under `.claude/tmp/pr-triage/`.

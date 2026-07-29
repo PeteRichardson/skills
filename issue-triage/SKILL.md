@@ -176,6 +176,24 @@ Then the body:
 * **Relationship graph** — the Phase 2 edges with their evidence. Skip pairs with no edge; don't pad.
 * **Open questions** — edges you couldn't classify confidently, ambiguous dependencies, anything needing maintainer judgment.
 
+## Next in the pipeline
+
+This skill is stage 3 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line. Which line depends on what the dispositions found, in this order:
+
+1. **Any `NEEDS-DECISION`** — that's the next step, not `/work-issue`. Name the issue numbers and say a batch run will halt on them anyway:
+
+   > Next: answer the decision on #12 (in the issue), then re-run `/issue-triage`. `/work-issue all` halts on it until then.
+2. **Otherwise** — the work:
+
+   > Next: `/work-issue all` to work these in order, or `/work-issue 18 15` to take just the first units.
+
+   Use the actual issue numbers from the top of the order in the scoped variant.
+3. **Nothing left to work** (everything is `DEFER` / `CLOSE-MOOT`) — say so, and point at the proposals as the thing to act on. Don't recommend `/work-issue` with an empty queue.
+
+Mention `DEFER` and `CLOSE-MOOT` proposals alongside whichever line fires — they're standing decisions for the user, not blockers on the next command.
+
+This skill never runs the next step itself; it prints the command and stops.
+
 ## Rules
 
 * Never create, close, label, comment on, or edit an issue. Never create a branch, worktree, or PR. This skill only reads and writes under `.claude/tmp/issue-triage/`.

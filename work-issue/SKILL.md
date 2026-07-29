@@ -153,6 +153,17 @@ For "every open issue not already addressed by a PR":
 5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
 6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit opens a real PR.
 
+## Next in the pipeline
+
+This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line, after the Phase 6 report (or the batch summary table):
+
+* **Batch run, or any run leaving 2+ PRs open** — the merge order:
+
+  > Next: `/pr-triage` to rank the open PRs by blast radius and get a merge order.
+* **Single run leaving one PR open** — no triage needed for a queue of one; say the PR is ready for review and merge.
+* **A `NEEDS-DECISION` halt** — the decision is the next step, not `/pr-triage`. Name the issue and repeat the question.
+* **Any unit failed, or a worktree was kept** — lead with that and its absolute path. A kept worktree is live state; it outranks the next command.
+
 ## Rules
 
 * Never work in the main checkout — every change happens inside the issue's worktree.
