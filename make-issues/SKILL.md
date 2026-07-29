@@ -89,7 +89,7 @@ For each composed candidate, in order:
 
 ## Phase 4: Label seeding and category resolution
 
-Vendored baseline — 22 labels (13 category + 4 severity + 3 effort + 2 source), matching `/project-review`'s current Phase 2 dimensions and `/code-review`'s severity/IDIOM tiers:
+Vendored baseline — 23 labels (13 category + 4 severity + 3 effort + 2 source + 1 status), matching `/project-review`'s current Phase 2 dimensions and `/code-review`'s severity/IDIOM tiers:
 
 ```
 category: Architectural decay              #d4c5f9
@@ -117,7 +117,11 @@ effort: S   #c5def5
 
 source: project-review   #bfd4f2
 source: code-review      #bfd4f2
+
+status: needs-decision   #d876e3
 ```
+
+`status:` is a workflow axis rather than a property of the finding, which is why it's a namespace of its own rather than another `category:`. **This skill never applies it and never creates it** — it's listed here because this file owns the label vocabulary, and `/issue-triage label` (its only writer) needs a canonical name and color to reuse instead of minting a variant. Seeding a label nothing in this run will use would leave an unused label on every repo that never triages.
 
 This is a **baseline, not a closed set** — matches `/project-review`'s own now-extensible Phase 2 vocabulary (favor reuse, allow a new category when genuinely justified). For every `category:` value a finding names, resolve it in this order before applying a label:
 
@@ -125,7 +129,7 @@ This is a **baseline, not a closed set** — matches `/project-review`'s own now
 2. **Exact or close semantic match against the vendored baseline above** — reuse its exact name/color.
 3. **Otherwise, it's genuinely new** — create it with `gh label create "category: <name>" --color "d4c5f9" --description "PROJECT_REVIEW.md / code-review label"`, and mention the new category in this run's summary so it's visible rather than silently added.
 
-`severity:`/`effort:`/`source:` labels stay closed (they're structural, not open classification) — check with `gh label list` before the first create of a run and create anything missing from the fixed list above.
+`severity:`/`effort:`/`source:`/`status:` labels stay closed (they're structural, not open classification) — never resolve one through the three steps above, and never mint a new value in these namespaces. Check with `gh label list` before the first create of a run and create anything missing from `severity:`/`effort:`/`source:`; leave `status:` alone, per the note above.
 
 ## Phase 5: Backfill (subcommand)
 

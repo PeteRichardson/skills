@@ -174,6 +174,7 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 * Never implement a `NEEDS-DECISION` issue by choosing the policy yourself. The whole point of the disposition is that the choice reaches the user before code exists.
 * Never act on `/issue-triage`'s `CLOSE-MOOT` or `DEFER` proposals — report them. Closing an issue or deferring one is a mutation on a judgment call; triage is advisory and so is this skill's handling of it.
 * Never work a deferred issue in batch mode, and never strip a deferral label to make an issue eligible. Deciding something is worth doing now is the user's call; the label is that decision already recorded. A single explicit `/work-issue <n>` may override it, but only after asking.
+* **`status: needs-decision` is not a deferral label.** `/issue-triage label` applies it for visibility in the GitHub UI; it is not in `DEFERRAL_LABELS` and must never be added to it. Never skip an issue for carrying it and never remove it. Batch mode derives the `NEEDS-DECISION` disposition fresh from the triage protocol on every run, which is what makes the halt correct — a label left behind after the decision was answered would otherwise block the issue silently and permanently. Read the disposition, not the label.
 * Stop and report rather than guess when `gh` fails (auth, rate limit) or the issue number doesn't exist. No silent retries.
 
 ---
