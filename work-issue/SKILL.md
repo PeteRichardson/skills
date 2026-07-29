@@ -1,6 +1,6 @@
 ---
 name: work-issue
-description: Take a GitHub issue through to an open PR on its own worktree, using a branch name that carries the PR number, issue number, and review finding ID (PR68-Fix-I60-F3-rust-ps-path). Use when the user types /work-issue, says "fix issue 60 on a worktree, push the branch and open a PR", "work issue 60", "start work on issue 60", or asks to do that for every open issue not already addressed by a PR. Owns branch/worktree naming, push, PR creation, and worktree teardown.
+description: Take a GitHub issue through to an open PR on its own worktree, using a branch name that carries the PR number, issue number, and review finding ID (PR68-Fix-I60-F3-rust-ps-path). Posts a resolution comment on each issue explaining what the PR proposes for that issue specifically. Use when the user types /work-issue, says "fix issue 60 on a worktree, push the branch and open a PR", "work issue 60", "start work on issue 60", or asks to do that for every open issue not already addressed by a PR. Owns branch/worktree naming, push, PR creation, the per-issue resolution comment, and worktree teardown.
 ---
 
 # Work Issue
@@ -45,6 +45,61 @@ Two names exist per unit:
 | **Final name** | `PR68-Fix-I60-F3-rust-ps-path` | the local branch only, after Phase 6 |
 
 They differ on purpose and permanently. The PR number doesn't exist until the branch has been pushed and the PR opened, and GitHub will not repoint an open PR's head branch — so the remote keeps the working name forever. Never try to reconcile them.
+
+## The resolution comment
+
+A linked PR tells a reader *where* the work went, not *what happened to their issue*. For a grouped unit that gap is the whole problem: several issues share one PR, so every reporter but one is handed a diff that is mostly not about their bug. Phase 5 posts one comment per issue to close that gap, written so it can be read during a bug scrub without opening the PR.
+
+**Everything in it is a proposal.** At the moment it's written the PR is open and unreviewed — it can be rejected, rewritten, or sent back for a rearchitecture that invalidates the note entirely. The format exists to make that unmissable.
+
+```markdown
+**Proposed fix — PR #22, open and unmerged**
+
+> [!NOTE]
+> Nothing has changed on `main` yet. If #22 is revised or rejected, everything below
+> the diagnosis changes with it. #22 is the source of truth.
+
+### Diagnosis
+`sparql_query()` retried every 5xx on a fixed 2s backoff and ignored `Retry-After`, so a
+throttled endpoint got hammered and the query still failed.
+
+### What #22 proposes (this issue's part)
+Parse and honour `Retry-After` when present; the fixed backoff becomes the fallback only.
+- `src/sparql/client.rs` — `retry_policy()`, `sparql_query()`
+
+### If it merges, you'll notice
+Queries against throttled endpoints wait the server's requested interval instead of failing
+after 3 fast retries.
+
+### Deliberately not covered
+Connection-level timeouts (still fixed at 30s) — that's #19.
+
+<!-- work-issue-resolution
+status: proposed
+pr: 22
+issue: 11
+grouped_with: 15
+finding: F7
+-->
+```
+
+Composing it:
+
+* **Diagnosis is past tense and durable.** It stays true whether or not the PR survives review, which is why it sits above the callout's blast line — everything below is contingent and phrased that way ("What #22 proposes", "If it merges"). Keep that split; hedging the diagnosis too makes the whole comment read as guesswork.
+* **State the root cause you actually found**, not a paraphrase of the issue title. When it turns out to differ from what the reporter described, say so plainly — that's the single most useful sentence in the comment for them.
+* **Cite the files and symbols you actually touched.** No invented paths, no guessed line numbers.
+* **Never claim tests pass without having run them** in the worktree.
+* **Omit `Deliberately not covered` entirely** when there were no real scope decisions. Never write "None" — same convention as `/pr-triage`'s severity-overrides section.
+* **Grouped units get one comment per issue, and they must differ.** Every section describes only that issue's slice; pasting one comment across the unit recreates the exact problem this solves. If a grouped change genuinely can't be decomposed per issue, say that plainly under `What #22 proposes` rather than inventing a split.
+
+Marker fields:
+
+* `status:` is always `proposed`. Nothing updates it today; it's there so a future merge-time pass can flip it without re-editing every comment ever written.
+* `pr:` and `issue:` are this comment's PR and the one issue it describes.
+* `grouped_with:` lists the *other* issue numbers in the unit. Omitted entirely for a single-issue unit.
+* `finding:` carries the `F<n>` from Phase 1. Omitted when absent, and **never inferred** — the same rule the branch name follows.
+
+The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerprint marker owns `finding_id:`, and three protocols scan issue comments for it (this skill's Phase 1, `/issue-triage` Phase 1, `/pr-triage` Phase 3). All three anchor on the marker name `project-review-finding`, so using a different key name here means even a careless grep can't cross the two markers.
 
 ## Phase 0: Resolve the invocation
 
@@ -92,7 +147,13 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
 
 1. `git push -u origin <working-name>` — the remote branch keeps this name permanently.
 2. `gh pr create --title "<title>" --body "<body>"`. The body must contain `Fixes #<n>` so GitHub links the issue, and should name the finding ID (`Addresses F3 from the project review`) when there is one.
-3. Capture the PR number from the command's output. If PR creation fails, stop here — do not rename, do not tear down. The worktree stays exactly as it is and the failure gets reported.
+3. Capture the PR number from the command's output. If PR creation fails, stop here — do not rename, do not tear down, do not comment. The worktree stays exactly as it is and the failure gets reported.
+4. **Post the resolution comment** — one per issue in the unit, composed per "The resolution comment" above.
+   1. **Check for an existing one first.** From the Phase 1 `gh issue view` result (or a fresh one), scan every comment for a `<!-- work-issue-resolution` marker naming this same `pr:`. If one exists, skip that issue and report it — never post a second comment for the same PR.
+   2. `gh issue comment <n> --body "<comment>"`.
+   3. **A comment failure never aborts the run.** The PR is already open and is the durable artifact; a missing comment is cosmetic by comparison. Report which issues didn't get one and continue to Phase 6.
+
+   No confirmation prompt for this step. It is strictly less consequential than the `gh pr create` that immediately precedes it, and batch mode already confirms the plan up front for runs of more than ~3 units.
 
 ## Phase 6: Rename, then tear down
 
@@ -106,7 +167,7 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
    If any check fails, **keep the worktree**, print its absolute path and which check failed, and say the branch is renamed but the tree is still live. Never `git worktree remove --force`.
 4. `git worktree remove .worktrees/<working-name>` — by its original path; the directory was never renamed.
 5. **Keep the renamed local branch.** It's the artifact that makes `git branch -d PR68-Fix-I60-F3-rust-ps-path` work after the PR merges, and it's what `git branch` shows you when you're trying to remember which branch became which PR.
-6. Report: issue number and title, PR number and URL, the final branch name, and whether the worktree was removed or kept (and why).
+6. Report: issue number and title, PR number and URL, the final branch name, whether the resolution comment was posted for each issue (and why not, if not), and whether the worktree was removed or kept (and why).
 
 ## Coming back to a PR later
 
@@ -150,7 +211,7 @@ For "every open issue not already addressed by a PR":
 
    If `~/.claude/skills/issue-triage/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
 4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
-5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
+5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, comment posted y/n, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
 6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit opens a real PR.
 
 ## Next in the pipeline
@@ -169,7 +230,11 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 * Never work in the main checkout — every change happens inside the issue's worktree.
 * Never delete a worktree with uncommitted or unpushed work, and never use `git worktree remove --force`. A kept worktree with a printed reason is always the correct fallback.
 * Never rename or force-push the remote branch to match the local one, and never try to repoint an open PR's head. The two names differing is the design, not a defect.
-* Never invent a finding ID or an issue number. An absent `F<n>` segment is correct output; a wrong one is worse than none.
+* Never invent a finding ID or an issue number. An absent `F<n>` segment is correct output; a wrong one is worse than none. The same holds inside the resolution comment — no invented finding IDs, no invented file paths.
+* Never post more than one resolution comment per issue per PR. Check for the marker before posting; a duplicated note on a re-run is noise on an issue someone else is reading.
+* Never paste the same resolution comment across a grouped unit. One PR closing three issues means three different comments, each about its own issue.
+* Comments only — never edit an issue's body or title, even one this skill's PR will close. Same boundary `/make-issues` holds.
+* Never write the resolution comment as though the fix has landed. It is written before review; `**Proposed fix**`, the `> [!NOTE]` callout, and the proposal tense are not decoration.
 * One worktree per issue. If Phase 2 says the issue is already covered, stop — don't create a parallel attempt.
 * Never implement a `NEEDS-DECISION` issue by choosing the policy yourself. The whole point of the disposition is that the choice reaches the user before code exists.
 * Never act on `/issue-triage`'s `CLOSE-MOOT` or `DEFER` proposals — report them. Closing an issue or deferring one is a mutation on a judgment call; triage is advisory and so is this skill's handling of it.
@@ -202,6 +267,16 @@ Because the alternative is reading three numbers off three different surfaces. A
 
 Chicken-and-egg: the PR number is assigned by `gh pr create`, which needs the branch pushed first. GitHub has no API to change an open PR's head branch, so making the remote match would mean closing the PR and refiling it — losing review comments and CI history to fix a cosmetic mismatch. The local name is where the ergonomics actually live (`git branch`, `git worktree`, tab-completion), so that's where the PR number goes.
 
+## Why the issue gets a comment when the PR already links to it
+
+GitHub's link tells you where the work went. It doesn't tell you what happened to your bug, and during a scrub that difference costs a click and a diff read per issue.
+
+The case that forces it is the grouped PR. When one PR closes three issues, the link is the *same* link for all three, and two of the three reporters open it to find a diff that's mostly about something else. A per-issue comment is the only place the answer to "what happened to mine, specifically" can live.
+
+The comment is written at PR-creation time because that's the last moment this skill controls — merging is manual and happens later, possibly after review has changed the fix. That's why the whole format is built around being a proposal rather than a report: the header says open and unmerged, a `> [!NOTE]` callout renders as a coloured box saying nothing has changed on `main`, and every section below the diagnosis is in proposal tense.
+
+The diagnosis is the exception, deliberately. What was actually wrong stays true whether the PR merges, gets rewritten, or is closed unmerged — so it's the one part written as fact, and it's the part that's still worth reading a year later if the PR was rejected and the bug refiled.
+
 ## Why the worktree gets torn down
 
 Once the PR is open, the local tree has served its purpose — review happens on the web or in a freshly checked-out worktree, and a directory left behind "just in case" accumulates into exactly the pile this naming scheme was invented to navigate. Teardown is conditional, not eager: uncommitted work, unpushed commits, or a failed PR creation all keep the tree alive with a printed reason.
@@ -216,3 +291,5 @@ Once the PR is open, the local tree has served its purpose — review happens on
 - Batch mode is sequential. Parallel worktrees would be faster and would produce conflicting PRs on overlapping code.
 - The finding ID is only as good as what `/make-issues` recorded at filing time. Issues predating that field, and hand-filed issues, get no `F<n>` segment ever — `/make-issues backfill` deliberately doesn't invent one.
 - No cleanup of the renamed local branches after their PRs merge. `git branch -d PR68-…` stays a manual step, which is the whole reason the PR number is in the name.
+- The resolution comment describes the fix **as proposed**, and nothing updates it afterwards. A PR substantially rewritten in review leaves a comment that no longer matches what merged. The format is built to survive that honestly rather than to prevent it — the callout says the PR is the source of truth, and `status: proposed` in the marker is there so a future merge-time pass can flip these without re-editing the format. Nothing reads or updates that field today.
+- A run that never reaches an open PR — a failure, or a worktree kept for uncommitted work — posts no comment at all. Those are reported in-session only, so an abandoned branch leaves its issue looking untouched on GitHub.

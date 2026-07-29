@@ -16,7 +16,7 @@ The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 | 1 | Find the work | `/project-review` and/or `/code-review <scope>` | Findings with `file:line`, severity, effort | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
 | 2 | File the work | `/make-issues [--all]` | GitHub issues, labelled + fingerprinted | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:`/`source:` labels |
 | 3 | Decide what to work | `/issue-triage` | Disposition per issue + ordered work units | `.claude/tmp/issue-triage/ISSUE_TRIAGE.md` |
-| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit | Branches `Fix-I<n>-…` (remote) / `PR<n>-Fix-I<n>-…` (local), open PRs |
+| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit | Branches `Fix-I<n>-…` (remote) / `PR<n>-Fix-I<n>-…` (local), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/pr-triage` | Blast-radius-ranked merge sequence | `.claude/tmp/pr-triage/PR_TRIAGE.md` |
 | 6 | Merge | **manual**, in the stage-5 order | Merged PRs, auto-closed issues | Git history |
 
@@ -164,6 +164,15 @@ Batch mode re-runs `/issue-triage`'s Phases 2–5 **fresh** to order its queue �
 a stale snapshot, since any merge or label change since invalidates one. It works units
 sequentially (parallel worktrees on overlapping code is how you manufacture the conflicts
 stage 5 then has to untangle), and it halts on `NEEDS-DECISION`.
+
+**Every issue also gets a resolution comment** once its PR is open — diagnosis, what the PR
+proposes for *that issue specifically*, what you'd notice if it merges, and what was left out.
+It's the answer to "what happened to my bug" without opening the diff, which matters most on a
+grouped PR where two of three reporters would otherwise get a link to changes that aren't
+theirs. Everything but the diagnosis is written in proposal tense with a `> [!NOTE]` callout
+saying nothing has landed on `main` yet, because at that point nothing has — review can still
+reject or rewrite the fix. Nothing updates the comment afterwards; the PR stays the source of
+truth.
 
 **Inside the worktree, the inner loop is the normal skills:**
 
