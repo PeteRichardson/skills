@@ -1,6 +1,6 @@
 ---
 name: issue-triage
-description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue, and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, and `/issue-triage clean` [--all]. Its Phases 2-5 are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. Does not create, close, label, or modify anything — advisory only.
+description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue, and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, `/issue-triage clean` [--all], and `/issue-triage label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 2-5 are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. A triage run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
 disable-model-invocation: true
 ---
 
@@ -16,9 +16,11 @@ When invoked via `/issue-triage`, follow the protocol below. Everything from her
 
 **The output is a disposition per issue, not a ranking.** A linear order cannot express "don't work this one at all" or "work these two as one change," which are the two highest-value things triage produces. Ranking is the last step, applied only to what survives.
 
-**This skill is advisory.** It never creates, closes, labels, comments on, or edits an issue; never creates a branch, worktree, or PR. It reads (`gh issue list`, `gh issue view`, `git log`, source files) and writes under `.claude/tmp/issue-triage/`. Every disposition is a recommendation the user or `/work-issue` acts on — in particular `CLOSE-MOOT` and `DEFER` are proposals requiring confirmation, never actions.
+**A triage run is advisory.** It never creates, closes, labels, comments on, or edits an issue; never creates a branch, worktree, or PR. It reads (`gh issue list`, `gh issue view`, `git log`, source files) and writes under `.claude/tmp/issue-triage/`. Every disposition is a recommendation the user or `/work-issue` acts on — in particular `CLOSE-MOOT` and `DEFER` are proposals requiring confirmation, never actions.
 
-**Deferral is the maintainer's call, not this skill's.** Proposing that an issue be deferred is useful; applying a `backlog` label is a priority decision belonging to the user. This skill proposes; it never labels.
+The single exception is the **`label` subcommand**, which the user invokes separately and which syncs exactly one label (`status: needs-decision`) after showing what it will change. Running a triage never applies it; typing `/issue-triage label` does.
+
+**Deferral is the maintainer's call, not this skill's.** Proposing that an issue be deferred is useful; applying a `backlog` label is a priority decision belonging to the user. This skill proposes; it never applies a deferral label, and `label` won't either — see "Why `status: needs-decision` is labelled but `backlog` isn't" below for why those two aren't the same act.
 
 **Axes stay separate.** Dependency order, severity, and effort are three different things. Never blend them into a score — tier them, and state the tradeoff in prose when they conflict. (Same reasoning as `/pr-triage`'s severity-vs-blast-radius tiering.)
 
@@ -48,6 +50,7 @@ Check the invocation before doing anything else:
 * **`/issue-triage open`** — run `open .claude/tmp/issue-triage/` (macOS). If `open` isn't available, print the absolute path. Stop here.
 * **`/issue-triage clean`** — read every file's frontmatter issue numbers, make one `gh issue list --state all --json number,state` call covering the union. Any file whose entire issue set is now closed is a removal candidate. Show candidates plus what's being kept and why, and ask for confirmation before deleting. Stop here.
 * **`/issue-triage clean --all`** — unconditional wipe of `.claude/tmp/issue-triage/`. Show what will be deleted, ask for confirmation. Stop here.
+* **`/issue-triage label`**, or **`/issue-triage label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run a triage.
 * **`/issue-triage`** (no args) — full-queue run, proceed to Phase 1.
 * **`/issue-triage #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
 * **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5 directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
@@ -176,13 +179,31 @@ Then the body:
 * **Relationship graph** — the Phase 2 edges with their evidence. Skip pairs with no edge; don't pad.
 * **Open questions** — edges you couldn't classify confidently, ambiguous dependencies, anything needing maintainer judgment.
 
+## The `label` subcommand
+
+Puts `status: needs-decision` on the issues this queue is blocked on, so they're filterable in the GitHub UI instead of only visible in a snapshot under `.claude/tmp/`. It is a **sync**, not an apply — it removes the label as readily as it adds it, because a label left behind after a decision was answered is worse than no label at all.
+
+1. **Resolve the snapshot**, don't generate one. `/issue-triage label` → `ISSUE_TRIAGE.md`; `/issue-triage label #11 #15` → `ISSUE_TRIAGE-11-15.md`. Missing → say so, tell the user to run the triage first, and stop. **Never run a triage implicitly here.** A sync against dispositions the user hasn't read is a mutation they didn't agree to.
+2. **Staleness check.** `gh issue list --state all --json number,state,title,updatedAt` over the snapshot's issue numbers. Warn — once, listing them — about any issue whose `updatedAt` is later than the snapshot's `generated` timestamp, or that has closed since. Offer re-running the triage first. Advisory, not blocking; the user may know the update was cosmetic.
+3. **Compute two sets, scoped strictly to issue numbers present in this snapshot's `units`:**
+   - **Add** — issues in a unit whose `disposition` is `NEEDS-DECISION`, that don't already carry the label.
+   - **Remove** — issues in this snapshot carrying the label whose disposition is now anything else.
+
+   Issues absent from the snapshot are never touched, **even if they carry the label**. A scoped run covers three issues; it has no basis for an opinion about the other thirty, and stripping a label off an issue it never looked at is the failure this scoping rule exists to prevent.
+4. **Ensure the label exists** — `gh label list`; if absent, `gh label create "status: needs-decision" --color "d876e3" --description "Blocked on a maintainer decision (from /issue-triage)"`. This is the `status:` namespace in `/make-issues`' vendored label baseline; reuse its exact name and color rather than minting a variant.
+5. **Show both lists and confirm** — issue number and title per line, adds and removals grouped separately, with the removals explained (decision answered, disposition changed, issue closed). Ask before touching anything, **even when one list is empty**. Skipping the prompt because "it's only two labels" is how a sync becomes a surprise.
+6. **Apply** — `gh issue edit <n> --add-label "status: needs-decision"` / `gh issue edit <n> --remove-label "status: needs-decision"`.
+7. **Report** what changed. If both sets were empty, say the labels already match the snapshot rather than printing nothing.
+
+This label is for humans reading GitHub. Nothing in this ecosystem reads it back: `/work-issue` re-derives `NEEDS-DECISION` from the triage protocol on every batch run precisely so a stale label can't silently block work. Recorded and displayed, never matched on — the same treatment `/make-issues` gives `finding_id`.
+
 ## Next in the pipeline
 
 This skill is stage 3 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line. Which line depends on what the dispositions found, in this order:
 
 1. **Any `NEEDS-DECISION`** — that's the next step, not `/work-issue`. Name the issue numbers and say a batch run will halt on them anyway:
 
-   > Next: answer the decision on #12 (in the issue), then re-run `/issue-triage`. `/work-issue all` halts on it until then.
+   > Next: answer the decision on #12 (in the issue), then re-run `/issue-triage`. `/work-issue all` halts on it until then — or `/issue-triage label` first, to flag it in the GitHub UI.
 2. **Otherwise** — the work:
 
    > Next: `/work-issue all` to work these in order, or `/work-issue 18 15` to take just the first units.
@@ -196,7 +217,9 @@ This skill never runs the next step itself; it prints the command and stops.
 
 ## Rules
 
-* Never create, close, label, comment on, or edit an issue. Never create a branch, worktree, or PR. This skill only reads and writes under `.claude/tmp/issue-triage/`.
+* Never create, close, comment on, or edit an issue. Never edit an issue body. Never create a branch, worktree, or PR. Apart from the `label` subcommand, this skill only reads and writes under `.claude/tmp/issue-triage/`.
+* `label` may add and remove exactly one label, `status: needs-decision`, only within the resolved snapshot's scope, and only after showing both lists and getting confirmation. Never touch any other label — `backlog` and every other deferral label stay the user's to apply.
+* Never run a triage as a side effect of `label`. A missing snapshot is a stop-and-report, not a prompt to generate one.
 * `clean` and `clean --all` are the only operations that delete anything; both require showing candidates and getting explicit confirmation.
 * Base `COLLIDES` claims on actually reading the source, not on file paths alone. `OVERLAPS` is cheap and mechanical; `COLLIDES` is not, and asserting it without opening the code is the main way this skill can produce a wrong grouping.
 * Label `MOOTS` and semantic `DEPENDS-ON` as judgment calls. "Likely moots" and "moots" are different claims — don't collapse them. When in doubt, leave the issue as `WORK` and raise it in Open questions; a wrongly-closed issue costs more than a redundant PR.
@@ -238,7 +261,10 @@ Requires the `gh` CLI, authenticated (`gh auth status`) with read access to the 
 /issue-triage list             # past snapshots at a glance
 /issue-triage open             # open the snapshot folder (macOS)
 /issue-triage clean [--all]    # tidy up old snapshots
+/issue-triage label [#11 #15]  # sync `status: needs-decision` onto GitHub
 ```
+
+`label` is the only one that writes to GitHub. It reads the newest snapshot for the given scope and makes GitHub agree with it — adding the label to issues currently dispositioned `NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are. Run it after a triage to make the blocked issues visible in the UI, and again after answering a decision to clear the flag.
 
 Output goes to `.claude/tmp/issue-triage/ISSUE_TRIAGE.md`, the shared per-skill scratch convention. It persists between sessions so repeat runs can report what changed, and never enters version control.
 
@@ -269,6 +295,18 @@ An issue that says "this requires a policy decision" is not implementable as fil
 Proposing a deferral and enacting one are different acts. `backlog` records a maintainer's decision that something isn't worth doing now; a skill that applies it is making that decision instead of surfacing it. `/work-issue`'s own rules already say deciding what's worth doing now is the user's call — this skill is the thing that makes the call *easy*, by arriving with a short list and reasons, not the thing that makes it unilaterally.
 
 The same logic applies more strongly to `CLOSE-MOOT`: closing an issue destroys queue state on a judgment call that can be wrong. Both are proposals.
+
+## Why `status: needs-decision` is labelled but `backlog` isn't
+
+They look like the same act — a skill putting a label on an issue — and they aren't.
+
+`backlog` records a decision *the maintainer made*: this isn't worth doing now. A skill applying it makes that call instead of surfacing it, and the cost of a wrong one is silent: the issue drops out of every future queue and nobody looks at it again.
+
+`status: needs-decision` records something about *the issue's own text* — that it isn't implementable as filed, because a policy or domain question inside it is unanswered. That's much nearer to an observation than a decision, and its failure mode runs the opposite direction: a wrongly-applied one makes you open the issue and conclude it's fine. The label invites inspection rather than suppressing it, which is the same job the disposition itself does — `NEEDS-DECISION` exists so a maintainer never discovers what got decided by reading a PR, and a label is that warning where the maintainer is actually looking.
+
+Two guardrails keep the distinction from eroding. It's synced rather than applied — the subcommand removes the label as readily as it adds it, so it can't rot into a claim nobody has re-checked. And nothing downstream reads it, so a stale one is a cosmetic problem rather than something that silently blocks `/work-issue`.
+
+The reason it's a separate subcommand rather than a step at the end of a triage run is removal, not permission. Applying it mid-run would mean every triage invocation mutates GitHub in both directions, which turns the advisory skill into a writing one for a benefit the user can get by typing six more characters.
 
 ## How this fits with your other skills
 

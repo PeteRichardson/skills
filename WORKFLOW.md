@@ -132,9 +132,22 @@ triage finds can't be expressed as an order:
 The bottom three are the ones that need you. `NEEDS-DECISION` in particular is the stage-3
 output to read first: leave one unanswered and stage 4 will halt on it anyway.
 
-Nothing here is applied. The skill never labels, closes, or comments — deferring and closing
+A triage run applies nothing — it never labels, closes, or comments. Deferring and closing
 are prioritization decisions, and a skill that enacts them is making the call rather than
 surfacing it.
+
+The one exception is opt-in and separate:
+
+```
+/issue-triage label [#11 #15]      # sync `status: needs-decision` onto GitHub
+```
+
+It makes GitHub agree with the snapshot — adding the label to issues currently dispositioned
+`NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are — so the
+blocked work is visible in the UI rather than only in `.claude/tmp/`. Run it after a triage,
+and again after answering a decision to clear the flag. Nothing downstream reads the label:
+stage 4 re-derives the disposition itself, so a stale one is cosmetic rather than a silent
+block.
 
 ## Stage 4 — Do the work
 
@@ -262,7 +275,8 @@ surface it rather than take it:
 - **Merge anything.** `/pr-triage` is advisory, full stop.
 - **Close or defer an issue.** `/issue-triage` proposes `CLOSE-MOOT` and `DEFER`; it never
   applies a `backlog` label or closes anything, and `/work-issue` won't act on those
-  proposals either.
+  proposals either. `/issue-triage label` is the one sanctioned mutation, and it touches
+  exactly one label after showing you both the additions and the removals.
 - **Decide a `NEEDS-DECISION` issue.** Batch mode halts instead of picking a policy and
   letting you discover it by reading a diff.
 - **Work a deferred issue in batch.** An explicit `/work-issue <n>` can override, but only

@@ -79,7 +79,7 @@ confirm counts the script already produced.
 
 | Dashboard shows | Read this | Report |
 |---|---|---|
-| `N NEEDS-DECISION` | The `Decisions needed` section of the newest `.claude/tmp/issue-triage/*.md` | The actual question and the options the issue named — answerable without opening GitHub |
+| `N NEEDS-DECISION` | The `Decisions needed` section of the newest `.claude/tmp/issue-triage/*.md` | The actual question and the options the issue named — answerable without opening GitHub. Mention `/issue-triage label` if the issues don't already carry `status: needs-decision`, but never run it: it mutates GitHub |
 | A triage snapshot exists | Its `Proposed deferrals` / `Proposed closures` sections | Standing proposals, flagged as awaiting the user's call. Never as blockers |
 | `N CONFLICTING` PRs | `gh pr list --json number,title,mergeable` | Which PRs need author action regardless of queue position |
 | A merge order exists | The `Overlap detail` section of the newest `.claude/tmp/pr-triage/*.md` | Any **likely semantic collision** pairs — the ones where a careless rebase merges cleanly and is still wrong |
