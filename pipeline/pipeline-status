@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+#
+# pipeline-status — where am I in the review → issue → PR → merge pipeline?
+#
+# Prints a six-stage dashboard derived entirely from artifacts already on disk and
+# on GitHub. There is no state file by design: a tracker drifts the moment you act
+# outside the flow, artifacts can't.
+#
+# Full pipeline docs: ~/.claude/skills/WORKFLOW.md
+#
+# Usage:
+#   pipeline-status          full dashboard
+#   pipeline-status -n       offline: local artifacts only, no gh calls
+#   pipeline-status -b       brief: just the recommended next command
+#
+# Deliberately read-only. It never runs a pipeline stage.
+
+set -uo pipefail
+
+OFFLINE=0
+BRIEF=0
+while getopts "nbh" opt; do
+  case "$opt" in
+    n) OFFLINE=1 ;;
+    b) BRIEF=1 ;;
+    h) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
+    *) exit 2 ;;
+  esac
+done
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "not a git repository" >&2; exit 1
+}
+cd "$ROOT" || exit 1
+
+# ---------------------------------------------------------------- portability
+
+mtime() {  # epoch seconds of a file
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+iso_epoch() {  # ISO-8601 (2026-07-28T14:32:00Z) -> epoch seconds
+  date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "${1%%+*}" +%s 2>/dev/null \
+    || date -d "$1" +%s 2>/dev/null
+}
+
+age() {  # epoch seconds -> "3d ago"
+  local d=$(( $(date +%s) - ${1:-0} ))
+  (( d < 0 )) && d=0
+  if   (( d < 3600  )); then echo "$((d/60))m ago"
+  elif (( d < 86400 )); then echo "$((d/3600))h ago"
+  else                       echo "$((d/86400))d ago"; fi
+}
+
+newest() {  # newest matching file, or empty
+  ls -t $1 2>/dev/null | head -1
+}
+
+row() {  # stage number, label, body
+  printf '  %s %-11s %s\n' "$1" "$2" "$3"
+}
+
+# ---------------------------------------------------------------- gh, in parallel
+
+HAS_GH=0
+if [[ $OFFLINE -eq 0 ]] && command -v gh >/dev/null 2>&1 \
+   && command -v jq >/dev/null 2>&1 \
+   && git remote -v 2>/dev/null | grep -q github.com; then
+  HAS_GH=1
+elif [[ $OFFLINE -eq 0 ]] && command -v gh >/dev/null 2>&1 \
+   && ! command -v jq >/dev/null 2>&1; then
+  GH_ERR="jq not installed — local artifacts only (brew install jq)"
+fi
+
+TMP=$(mktemp -d) || exit 1
+trap 'rm -rf "$TMP"' EXIT
+
+if [[ $HAS_GH -eq 1 ]]; then
+  gh issue list --state open --limit 300 \
+     --json number,labels,updatedAt > "$TMP/issues" 2>"$TMP/err" &
+  gh pr list --state open --limit 100 \
+     --json number,title,mergeable > "$TMP/prs" 2>/dev/null &
+  gh pr list --state merged --limit 30 \
+     --json number,mergedAt > "$TMP/merged" 2>/dev/null &
+  wait
+  # A single failure (auth, rate limit, no such repo) downgrades to offline
+  # rather than printing half a dashboard of zeros.
+  if [[ -s "$TMP/err" ]] || [[ ! -s "$TMP/issues" ]]; then
+    HAS_GH=0
+    GH_ERR=$(head -1 "$TMP/err" 2>/dev/null)
+  fi
+fi
+
+# ---------------------------------------------------------------- stage 1: reviews
+
+PR_REVIEW="docs/reviews/PROJECT_REVIEW.md"
+CR_REVIEW=$(newest "docs/reviews/code-review_*.md")
+REVIEW_LINES=()
+REVIEW_STALE=0
+REVIEW_BEHIND=0
+
+if [[ -f $PR_REVIEW ]]; then
+  m=$(mtime "$PR_REVIEW")
+  REVIEW_BEHIND=$(git rev-list --count --since="@$m" HEAD 2>/dev/null || echo 0)
+  note=""
+  if [[ ${REVIEW_BEHIND:-0} -gt 0 ]]; then
+    note="  ·  $REVIEW_BEHIND commits since  [stale]"; REVIEW_STALE=1
+  fi
+  REVIEW_LINES+=("PROJECT_REVIEW.md  $(age "$m")$note")
+fi
+if [[ -n $CR_REVIEW ]]; then
+  m=$(mtime "$CR_REVIEW")
+  REVIEW_LINES+=("$(basename "$CR_REVIEW")  $(age "$m")")
+fi
+
+# ---------------------------------------------------------------- stage 2: issues
+
+ISSUES_OPEN=0; ISSUES_FROM_REVIEW=0
+if [[ $HAS_GH -eq 1 ]]; then
+  ISSUES_OPEN=$(jq -r 'length' < "$TMP/issues" 2>/dev/null || echo 0)
+  ISSUES_FROM_REVIEW=$(jq -r '
+    [ .[] | select(.labels | map(.name) | any(startswith("source: "))) ] | length
+  ' < "$TMP/issues" 2>/dev/null || echo 0)
+fi
+
+# ---------------------------------------------------------------- stage 3: issue-triage
+
+IT_DIR=".claude/tmp/issue-triage"
+IT_FILE=$(newest "$IT_DIR/*.md")
+IT_UNITS=0; IT_DECIDE=0; IT_AGE=""
+if [[ -n $IT_FILE ]]; then
+  IT_UNITS=$(grep -c '^  - order:' "$IT_FILE" 2>/dev/null || echo 0)
+  IT_DECIDE=$(grep -c 'disposition: NEEDS-DECISION' "$IT_FILE" 2>/dev/null || echo 0)
+  IT_AGE=$(age "$(mtime "$IT_FILE")")
+fi
+
+# ---------------------------------------------------------------- stage 4: in flight
+
+BRANCHES=$(git branch -a 2>/dev/null | grep -cE 'Fix-I[0-9]+' || true)
+PRS_OPEN=0; PRS_CONFLICT=0
+if [[ $HAS_GH -eq 1 ]]; then
+  PRS_OPEN=$(jq -r 'length' < "$TMP/prs" 2>/dev/null || echo 0)
+  PRS_CONFLICT=$(jq -r '[ .[] | select(.mergeable=="CONFLICTING") ] | length' \
+    < "$TMP/prs" 2>/dev/null || echo 0)
+fi
+
+# Open issues with no branch and no PR naming them — the stage-4 backlog.
+UNSTARTED=0
+if [[ $HAS_GH -eq 1 ]]; then
+  allrefs=$(git branch -a 2>/dev/null; jq -r '.[].number' < "$TMP/prs" 2>/dev/null)
+  for n in $(jq -r '.[].number' < "$TMP/issues" 2>/dev/null); do
+    grep -qE "(^|-)I?${n}(-|$)" <<<"$allrefs" || UNSTARTED=$((UNSTARTED+1))
+  done
+fi
+
+# ---------------------------------------------------------------- stage 5: pr-triage
+
+PT_DIR=".claude/tmp/pr-triage"
+PT_FILE=$(newest "$PT_DIR/*.md")
+PT_COUNT=0; PT_AGE=""; PT_TOP=""; PT_STALE=0
+if [[ -n $PT_FILE ]]; then
+  m=$(mtime "$PT_FILE")
+  PT_COUNT=$(grep -c '^  - number:' "$PT_FILE" 2>/dev/null || echo 0)
+  PT_TOP=$(grep -m1 '^  - number:' "$PT_FILE" 2>/dev/null | tr -dc '0-9')
+  PT_AGE=$(age "$m")
+  if [[ $HAS_GH -eq 1 ]]; then
+    last=$(jq -r 'map(.mergedAt) | sort | last // empty' < "$TMP/merged" 2>/dev/null)
+    if [[ -n $last ]]; then
+      e=$(iso_epoch "$last")
+      [[ -n $e && $e -gt $m ]] && PT_STALE=1
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------- stage 6: merged
+
+MERGED=0
+[[ $HAS_GH -eq 1 ]] && MERGED=$(jq -r 'length' < "$TMP/merged" 2>/dev/null || echo 0)
+
+# ---------------------------------------------------------------- next step
+
+next_step() {
+  if [[ $HAS_GH -eq 0 ]]; then
+    if [[ ${#REVIEW_LINES[@]} -eq 0 ]]; then
+      echo "/project-review  —  no review report in docs/reviews/ yet"
+    else
+      echo "work the findings in ${REVIEW_LINES[0]%% *} directly  —  no GitHub remote, stages 2-5 don't apply"
+    fi
+    return
+  fi
+  if [[ ${#REVIEW_LINES[@]} -eq 0 && $ISSUES_OPEN -eq 0 ]]; then
+    echo "/project-review  —  nothing filed and no review to file from"; return
+  fi
+  # A report far behind HEAD cites line numbers that have drifted. Filing from it
+  # produces issues pointing at the wrong code, so re-review beats re-file.
+  if [[ $ISSUES_FROM_REVIEW -eq 0 && $REVIEW_BEHIND -ge 10 ]]; then
+    echo "/project-review  —  the report is $REVIEW_BEHIND commits behind HEAD; re-run it before filing findings with drifted line numbers"
+    return
+  fi
+  if [[ $ISSUES_FROM_REVIEW -eq 0 && ${#REVIEW_LINES[@]} -gt 0 ]]; then
+    s=""; [[ $REVIEW_BEHIND -gt 0 ]] && s=" (report is $REVIEW_BEHIND commits behind; /make-issues will flag drifted findings)"
+    echo "/make-issues  —  a review exists but no issues carry a source: label$s"; return
+  fi
+  if [[ $IT_DECIDE -gt 0 ]]; then
+    echo "answer the $IT_DECIDE NEEDS-DECISION issue(s) in $IT_FILE, then re-run /issue-triage"
+    echo "     (/work-issue all halts on them until then)"; return
+  fi
+  if [[ $ISSUES_OPEN -gt 0 && -z $IT_FILE ]]; then
+    echo "/issue-triage  —  $ISSUES_OPEN open issues, never triaged"; return
+  fi
+  if [[ $UNSTARTED -gt 0 ]]; then
+    echo "/work-issue all  —  $UNSTARTED open issue(s) with no branch or PR"; return
+  fi
+  if [[ $PRS_OPEN -ge 2 && ( -z $PT_FILE || $PT_STALE -eq 1 ) ]]; then
+    echo "/pr-triage  —  $PRS_OPEN PRs open, ${PT_FILE:+merge order is stale}${PT_FILE:-no merge order yet}"
+    return
+  fi
+  if [[ $PRS_OPEN -ge 1 && -n $PT_TOP ]]; then
+    echo "review and merge #$PT_TOP, then re-run /pr-triage  —  every merge invalidates the rest of the order"
+    return
+  fi
+  if [[ $PRS_OPEN -eq 1 ]]; then
+    echo "review and merge the open PR  —  a queue of one needs no triage"; return
+  fi
+  if [[ $REVIEW_STALE -eq 1 ]]; then
+    echo "/project-review  —  queue is empty and the last review is stale; start the next round"; return
+  fi
+  echo "nothing pending  —  /project-review or /code-review <scope> to start the next round"
+}
+
+# ---------------------------------------------------------------- output
+
+if [[ $BRIEF -eq 1 ]]; then
+  echo "next: $(next_step)"
+  exit 0
+fi
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+echo
+echo "  $(basename "$ROOT")  ($branch)"
+[[ $HAS_GH -eq 0 ]] && echo "  ${GH_ERR:-offline — local artifacts only}"
+echo
+
+if [[ ${#REVIEW_LINES[@]} -eq 0 ]]; then
+  row 1 review "—"
+else
+  row 1 review "${REVIEW_LINES[0]}"
+  for ((i=1; i<${#REVIEW_LINES[@]}; i++)); do row " " "" "${REVIEW_LINES[$i]}"; done
+fi
+
+if [[ $HAS_GH -eq 1 ]]; then
+  row 2 issues "$ISSUES_OPEN open  ·  $ISSUES_FROM_REVIEW from a review report"
+else
+  row 2 issues "—"
+fi
+
+if [[ -n $IT_FILE ]]; then
+  d=""; [[ $IT_DECIDE -gt 0 ]] && d="  ·  $IT_DECIDE NEEDS-DECISION  <- blocked on you"
+  row 3 triage "$(basename "$IT_FILE")  $IT_AGE  ·  $IT_UNITS units$d"
+else
+  row 3 triage "—"
+fi
+
+row 4 "in flight" "$BRANCHES branches  ·  $PRS_OPEN PRs open$( [[ $PRS_CONFLICT -gt 0 ]] && echo "  ·  $PRS_CONFLICT CONFLICTING" )"
+
+if [[ -n $PT_FILE ]]; then
+  s=""; [[ $PT_STALE -eq 1 ]] && s="  [stale: a PR merged since]"
+  row 5 "merge order" "$(basename "$PT_FILE")  $PT_AGE  ·  $PT_COUNT PRs$s"
+else
+  row 5 "merge order" "—"
+fi
+
+row 6 merged "$( [[ $HAS_GH -eq 1 ]] && echo "$MERGED PRs (last 30)" || echo "—" )"
+
+echo
+echo "  next: $(next_step)"
+echo

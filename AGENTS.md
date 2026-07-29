@@ -8,6 +8,8 @@ A collection of personal Claude Code skills. Each top-level directory is one ski
 
 **Live deployment:** `~/.claude/skills` is a symlink to this repo. Any edit to a `SKILL.md` here takes effect immediately in new Claude Code sessions — there is no install or publish step. Renaming or deleting a directory removes that skill.
 
+**`WORKFLOW.md`** documents how six of these skills chain into one pipeline — `/project-review` + `/code-review` → `/make-issues` → `/issue-triage` → `/work-issue` → `/pr-triage` → manual merge. Read it before changing any of those six, or `/pipeline`, which detects where a repo sits in that chain. Each of the six ends its run by naming the next command (their "Next in the pipeline" sections); those hand-offs and `pipeline/pipeline-status`'s detection cascade both need updating if a stage's inputs, outputs, or artifact paths change.
+
 ## Skill conventions
 
 Frontmatter fields used across this repo:
