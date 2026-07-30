@@ -252,10 +252,13 @@ only part of this skill that force-pushes, which is why it's an explicit command
 something a batch run does on its own.
 
 1. **Find the candidates.** `gh pr list --state open --json number,body,headRefName,baseRefName`
-   and keep those whose body contains a `<!-- work-issue-stack` marker. Scoped invocation
-   filters this list; a named PR with no marker is reported as such, not guessed at.
+   and keep those whose body contains a `<!-- work-issue-stack` marker. Skip any marker that
+   carries `resolved: true` — that PR's stack was already unwound and there is nothing left to
+   restack. Scoped invocation filters this list; a named PR with no marker is reported as such,
+   not guessed at.
 2. **Read the marker** for `parent_pr`, `parent_branch`, `parent_head`. A marker missing any
-   of the three is corrupt — report it and skip that PR. Never reconstruct a `parent_head`
+   of the three is corrupt — report it and skip that PR. `resolved: true` is an optional fourth
+   key; its absence is normal and never counts as corruption. Never reconstruct a `parent_head`
    from the branch's current position; that's the one value that can't be re-derived once the
    parent has moved.
 3. **Classify the parent** with `gh pr view <parent_pr> --json state,headRefOid,baseRefName`:
@@ -264,7 +267,7 @@ something a batch run does on its own.
    |---|---|
    | Merged | Restack onto the parent's own base branch |
    | Open, `headRefOid` still equals `parent_head` | Nothing to do — report "up to date" and skip |
-   | Open, `headRefOid` has moved | Restack onto the parent's new head |
+   | Open, `headRefOid` has moved | Restack onto the parent's branch (the marker's `parent_branch`) |
    | Closed unmerged | **Report and stop for this PR.** Its base is gone, and whether the child still makes sense is a judgment call, not a rebase |
 
 4. **Confirm before touching anything.** List each PR, its parent, and the target it will be
@@ -291,8 +294,20 @@ something a batch run does on its own.
    refuse to clobber a commit someone pushed to the child branch since.
 9. **Refresh the marker** with `gh pr edit <pr> --body <updated>`: set `parent_head` to the
    sha just rebased onto, and — if the parent merged — set `parent_branch` to the base branch
-   and drop `parent_pr`, since there is no longer a parent PR to wait for. A marker written
-   once and never updated silently degrades the *next* restack into a plain rebase.
+   and add a fourth line, `resolved: true`, since there is no longer a parent PR to wait for.
+   **`parent_pr` is never removed** — step 2's corruption check requires all three original
+   keys, and a marker missing one would be misreported as corrupt on every later scan. A
+   marker written once and never updated silently degrades the *next* restack into a plain
+   rebase.
+
+   ```html
+   <!-- work-issue-stack
+   parent_pr: 68
+   parent_branch: main
+   parent_head: 9f8e7d6c1b2a3d4e5f60718293a4b5c6d7e8f901
+   resolved: true
+   -->
+   ```
 10. **Retarget the PR** if GitHub hasn't: `gh pr edit <pr> --base <target>`. GitHub
     auto-retargets a child when its parent merges, so this is usually a no-op — do it anyway
     rather than relying on it, and report when it was actually needed.
@@ -391,6 +406,8 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 * Never push a restack whose verification step still shows the parent's commits.
 * Never restack a child whose parent PR was closed unmerged. Report it; the call is the
   user's.
+* Never drop a key from a stack marker when refreshing it. A key that disappears turns a valid
+  marker into one the corruption check in step 2 rejects.
 
 ---
 

@@ -194,7 +194,7 @@ Per child PR carrying a `work-issue-stack` marker:
    |---|---|
    | Merged | Restack onto the base branch |
    | Open, head still `parent_head` | Nothing to do — report and skip |
-   | Open, head moved (force-push or new commits) | Restack onto the parent's new head |
+   | Open, head moved (force-push or new commits) | Restack onto the parent's branch (the marker's `parent_branch`) |
    | Closed unmerged | **Report and stop.** The child's base is gone; whether its change still makes sense is a judgment call, not a rebase |
 
 3. `git fetch origin`, then
@@ -205,9 +205,12 @@ Per child PR carrying a `work-issue-stack` marker:
    child's own commits. If the parent's commits are still present, something is wrong —
    report rather than push.
 6. `git push --force-with-lease` — never bare `--force`. Confirm before pushing.
-7. **Update the marker** with the new `parent_head` (and `parent_branch` → the base branch
-   once the parent merged), so a second restack is as deterministic as the first. A marker
-   written once and never refreshed goes stale on the first parent force-push.
+7. **Update the marker** with the new `parent_head` (and `parent_branch` → the base branch,
+   plus a fourth line `resolved: true`, once the parent merged), so a second restack is as
+   deterministic as the first. **`parent_pr` is never removed** — the corruption check requires
+   all three original keys, and a marker missing one reads as corrupt on every later scan even
+   though the restack that produced it succeeded. A marker written once and never refreshed
+   goes stale on the first parent force-push.
 8. Retarget the PR base if GitHub hasn't (`gh pr edit <n> --base <target>`). GitHub
    auto-retargets children when a parent merges; step 8 is the fallback for the cases it
    doesn't, and is a no-op when it already did.
