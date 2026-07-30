@@ -111,6 +111,9 @@ The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerpri
 * **`/work-issue all`**, or any "for each open issue that isn't already addressed by a PR" phrasing — batch mode, see Batch mode below.
 * **`/work-issue <n> <m> ...`** — several issue numbers. Enter batch mode scoped to exactly those, using the `issue-triage` protocol per step 3 below. This is batch mode over a hand-picked set, not a series of independent single runs — the numbers may turn out to belong in one grouped PR.
 * **`/work-issue <description>`** with no issue number — stop. The branch format requires `I<n>`, and an issue is the durable record this whole flow hangs off. Offer to file the issue first (`gh issue create`, or `/make-issues` if it came from a review report), then re-invoke with the number.
+* `restack` — `/work-issue restack` (every open stacked PR whose parent has moved or merged)
+  or `/work-issue restack 71 74` (scoped to those PRs). Skips Phases 1–6 entirely and runs
+  the restack protocol below. It works no issues and opens no PRs.
 
 ## Phase 1: Resolve the issue and compute both names
 
@@ -239,6 +242,66 @@ plain `git rebase origin/<base>` works when the parent was rebase-merged and **c
 untouched lines** when it was squash-merged with more than one commit. Verified by
 `work-issue/restack-recipe.test.sh`.
 
+This is the manual version of the steps below — reach for `/work-issue restack` instead when
+you don't need to do it by hand.
+
+## The `restack` subcommand
+
+Replays a stacked child's own commits onto its new base after its parent moved. This is the
+only part of this skill that force-pushes, which is why it's an explicit command rather than
+something a batch run does on its own.
+
+1. **Find the candidates.** `gh pr list --state open --json number,body,headRefName,baseRefName`
+   and keep those whose body contains a `<!-- work-issue-stack` marker. Scoped invocation
+   filters this list; a named PR with no marker is reported as such, not guessed at.
+2. **Read the marker** for `parent_pr`, `parent_branch`, `parent_head`. A marker missing any
+   of the three is corrupt — report it and skip that PR. Never reconstruct a `parent_head`
+   from the branch's current position; that's the one value that can't be re-derived once the
+   parent has moved.
+3. **Classify the parent** with `gh pr view <parent_pr> --json state,headRefOid,baseRefName`:
+
+   | Parent state | Action |
+   |---|---|
+   | Merged | Restack onto the parent's own base branch |
+   | Open, `headRefOid` still equals `parent_head` | Nothing to do — report "up to date" and skip |
+   | Open, `headRefOid` has moved | Restack onto the parent's new head |
+   | Closed unmerged | **Report and stop for this PR.** Its base is gone, and whether the child still makes sense is a judgment call, not a rebase |
+
+4. **Confirm before touching anything.** List each PR, its parent, and the target it will be
+   rebased onto. This force-pushes; a batch of them force-pushes repeatedly.
+5. **Restack**, in a throwaway worktree so the main checkout is never involved:
+
+   ```bash
+   git fetch origin
+   git worktree add .worktrees/restack-<pr> <child branch>
+   cd .worktrees/restack-<pr>
+   git rebase --onto origin/<target> <parent_head> <child branch>
+   ```
+
+   `--onto` with the recorded sha is what makes this work regardless of the parent's merge
+   mode — see `work-issue/restack-recipe.test.sh`, which proves the naive form conflicts.
+6. **On conflict: stop.** `git rebase --abort`, keep the worktree, print its absolute path,
+   and move to the next PR. Never resolve a restack conflict unattended — a conflict here is
+   the semantic-collision case `/pr-triage` warns about, and a plausible-looking resolution
+   can merge cleanly and still be wrong.
+7. **Verify before pushing.** `git log --oneline origin/<target>..<child branch>` must contain
+   only the child's own commits. If any of the parent's are still there, something is wrong
+   with the marker or the target — report it and push nothing.
+8. **Push:** `git push --force-with-lease`. Never bare `--force`: the lease is what makes this
+   refuse to clobber a commit someone pushed to the child branch since.
+9. **Refresh the marker** with `gh pr edit <pr> --body <updated>`: set `parent_head` to the
+   sha just rebased onto, and — if the parent merged — set `parent_branch` to the base branch
+   and drop `parent_pr`, since there is no longer a parent PR to wait for. A marker written
+   once and never updated silently degrades the *next* restack into a plain rebase.
+10. **Retarget the PR** if GitHub hasn't: `gh pr edit <pr> --base <target>`. GitHub
+    auto-retargets a child when its parent merges, so this is usually a no-op — do it anyway
+    rather than relying on it, and report when it was actually needed.
+11. **Tear the worktree down** — `git worktree remove .worktrees/restack-<pr>` — unless step 6
+    kept it.
+
+End with a table: PR, parent, what happened (restacked / up to date / conflicted / parent
+closed), and the new base. A conflicted entry names its kept worktree path.
+
 ## Batch mode
 
 For "every open issue not already addressed by a PR":
@@ -295,6 +358,9 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 * **Single run leaving one PR open** — no triage needed for a queue of one; say the PR is ready for review and merge.
 * **A `NEEDS-DECISION` halt** — the decision is the next step, not `/pr-triage`. Name the issue and repeat the question.
 * **Any unit failed, or a worktree was kept** — lead with that and its absolute path. A kept worktree is live state; it outranks the next command.
+* **A batch that created any `STACK` units** — say that the stacked PRs must merge in chain
+  order, and that `/work-issue restack` is the step between merging a parent and merging its
+  child.
 
 ## Rules
 
@@ -319,6 +385,12 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
   captured in Phase 3, re-derive it with `git rev-parse origin/<parent branch>` before the
   branch has any commits of its own — never after.
 * Never stack onto a parent whose PR failed to open. No parent PR, no child.
+* Never restack without confirming first. It force-pushes, and on a batch it force-pushes
+  several branches in a row.
+* Never resolve a restack conflict automatically. Keep the worktree, report the path, move on.
+* Never push a restack whose verification step still shows the parent's commits.
+* Never restack a child whose parent PR was closed unmerged. Report it; the call is the
+  user's.
 
 ---
 
@@ -333,6 +405,8 @@ This skill is deliberately repo-agnostic — plain `git worktree` and `gh`, no p
 ```
 /work-issue 60
 /work-issue all
+/work-issue restack              # every stacked PR whose parent merged or moved
+/work-issue restack 71 74        # only these
 ```
 
 Or just say it: "fix issue 60 on a worktree, push the branch and open a PR". The skill is model-invocable precisely so that phrasing works — the whole point is that the naming convention applies whether or not you remember to type the slash command.
