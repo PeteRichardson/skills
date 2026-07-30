@@ -72,6 +72,29 @@ Build a PR × PR overlap table: which pairs of PRs touch at least one file in co
 
 For each PR, compute blast radius = count of other open PRs it shares at least one file with. Sort ascending — lowest blast radius merges first, since merging it disturbs the fewest other PRs.
 
+### Stack constraint (hard, checked before ranking)
+
+Read each PR's body for a `<!-- work-issue-stack` marker and record its `parent_pr`. Skip a
+marker carrying `resolved: true` entirely — that PR's stack was already unwound by
+`/work-issue restack` after its parent merged, so for every purpose below it's an ordinary
+unstacked PR: no parent constraint, no blast-radius correction. Then, for every remaining
+(unresolved) marker:
+
+1. **A child never ranks above its parent.** This is a hard constraint like `DEPENDS-ON` is in
+   `/issue-triage` Phase 4, and it outranks blast radius *and* the critical-severity
+   promotion below — a child promoted above its parent isn't a tradeoff, it's an unmergeable
+   order. If a critical-severity child would be promoted, promote the whole chain, parent
+   first, and say so.
+2. **Exclude a parent from its child's blast radius.** A stacked child shares files with its
+   parent by construction — that's why it was stacked. Counting that shared file penalizes
+   the chain for its own structure and sorts every stack to the back of the queue. Count only
+   the *other* open PRs it shares a file with.
+3. **Mark children blocked.** A child cannot merge until its parent does, and needs
+   `/work-issue restack` in between.
+
+A marker whose `parent_pr` names a PR that is already merged is a child awaiting its restack,
+not a stack member — treat it as unblocked, and say the restack is outstanding.
+
 Tiebreakers, in order, when blast radius is equal:
 
 1. **Staleness** — days since `updatedAt`. Older/less-active PRs go earlier: drift compounds whether or not anyone's watching it, so surface it before its rebase gets harder.
@@ -151,13 +174,23 @@ prs:
     issues:
       - number: 58
         finding: F12
+  - number: 14
+    critical: false
+    stack:
+      parent_pr: 7
+      blocked: true
+    issues:
+      - number: 61
+        finding: F14
   - number: 12
     critical: false
     issues: []
 ---
 ```
 
-`prs` is an ordered array covering every PR this snapshot tracks, one entry per PR, in the Phase 3/severity-override recommended merge order (order is irrelevant for entries that later merge or close — `list` re-sorts those by resolution date instead, see Phase 0). `critical` on each entry records whether Phase 3's severity override promoted that PR — set it once at write time from Phase 3's own determination, never recomputed from anything else. `issues` records what the Phase 3 lookup found: one entry per linked issue, `[]` when the PR links none, with `finding` omitted for any issue that has no recorded finding ID. Entries are never removed from `prs`, even after the PR merges or closes — see Repeat-run mode below for why. Then the body:
+`prs` is an ordered array covering every PR this snapshot tracks, one entry per PR, in the Phase 3/severity-override recommended merge order (order is irrelevant for entries that later merge or close — `list` re-sorts those by resolution date instead, see Phase 0). `critical` on each entry records whether Phase 3's severity override promoted that PR — set it once at write time from Phase 3's own determination, never recomputed from anything else. `issues` records what the Phase 3 lookup found: one entry per linked issue, `[]` when the PR links none, with `finding` omitted for any issue that has no recorded finding ID. Entries are never removed from `prs`, even after the PR merges or closes — see Repeat-run mode below for why.
+
+`stack` is absent on unstacked PRs — absent means unstacked, not "unblocked." Present, it carries the `parent_pr` from the PR's `work-issue-stack` marker and `blocked`: `true` while the parent is still open (this PR cannot merge yet), `false` once the parent has merged (the parent constraint is satisfied and `/work-issue restack` is what's outstanding, not a merge block). A marker carrying `resolved: true` is a stack that was already unwound — write no `stack` entry at all for that PR; it's tracked exactly like any unstacked PR. Then the body:
 
 * **Summary table** — columns: `PR # | Issue # | Finding | Title | Author | Linked Issue Severity | Files Changed | Overlaps With | Blast Radius | Staleness (days) | Size (+/-) | Mergeable? | Suggested Order`.
 * **Recommended merge sequence** — a table, one row per PR in merge order, so the PR number, issue number, and finding ID sit side by side rather than having to be reassembled from the summary table:
@@ -175,6 +208,14 @@ prs:
   - PR and issue numbers keep their `#` prefix; finding IDs stay bare (`F3`, or a bare ordinal for a `/code-review`-sourced issue). Never write `#F3` or a bare PR number.
   - Use `—` for a PR with no linked issue, and for a linked issue with no recorded finding ID. Never leave a cell blank, and never fill one in by guessing.
   - A PR linking multiple issues gets them comma-separated in one row (`#42, #51`), with the `Finding` cell listing each one's ID in the same order (`F3, —`).
+* **Stack chains** — each chain as one row, in link order, with the restack between links so
+  the sequence is executable as written:
+
+  > merge #7 → `/work-issue restack` → merge #14 → `/work-issue restack` → merge #19
+
+  A child listed without its restack step reads as mergeable straight after its parent, which
+  it isn't. Omit this section entirely if no open PR carries an unresolved `work-issue-stack`
+  marker.
 * **Severity overrides** — any PR promoted ahead of blast-radius order due to a critical-severity linked issue, naming the issue and which other PRs now bear increased rebase cost as a result. Omit this section entirely (don't write "none") if the repo has no severity-labeled issues linked to any open PR.
 * **Overlap detail** — for each overlapping pair, the Phase 4 classification and reasoning. Incidental-adjacency pairs can be one line; likely-collision pairs get a short explanation of what's actually colliding and why it matters.
 * **Already-conflicting PRs** — any PR GitHub already reports as `CONFLICTING` against the current base, called out separately since these need author action regardless of queue position.
@@ -191,6 +232,9 @@ The re-run half is not optional boilerplate: a user working down a printed list 
 * **PR #1 hasn't had a line-level review** — put that first: `/code-review 1`, then merge. (The built-in `/review` is the quick-prose alternative when no report is wanted.)
 * **PR #1 is already `CONFLICTING`** — say so; it needs author action before merging regardless of its position, and the next mergeable PR in the order is the real next step.
 * **A single-PR queue** — no order to work down. Say it's ready to review and merge, and skip the re-run line.
+* **The top PR is a stacked child whose parent just merged** — `/work-issue restack` is the
+  next step, not the merge. Merging before the restack is what produces a PR diff containing
+  its parent's changes.
 
 ## Rules
 
