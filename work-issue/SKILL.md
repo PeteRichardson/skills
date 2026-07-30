@@ -91,6 +91,10 @@ Composing it:
 * **Never claim tests pass without having run them** in the worktree.
 * **Omit `Deliberately not covered` entirely** when there were no real scope decisions. Never write "None" — same convention as `/pr-triage`'s severity-overrides section.
 * **Grouped units get one comment per issue, and they must differ.** Every section describes only that issue's slice; pasting one comment across the unit recreates the exact problem this solves. If a grouped change genuinely can't be decomposed per issue, say that plainly under `What #22 proposes` rather than inventing a split.
+* **For a `STACK` unit**, the comment must say the PR is stacked on #`<parent_pr>` and cannot
+  merge until that one does. A reporter reading the issue would otherwise reasonably expect
+  an open PR to be mergeable, and the GitHub UI shows the unfamiliar base branch without
+  explaining it.
 
 Marker fields:
 
@@ -132,7 +136,23 @@ Run from the main repo, not from another worktree:
 
 1. `git fetch origin` and confirm the base branch (default branch unless the user says otherwise).
 2. Ensure `.worktrees/` is gitignored — check `.gitignore`, append the single line if absent, same one-line-entry convention `/pr-triage` uses for `.claude/tmp/`.
-3. `git worktree add .worktrees/<working-name> -b <working-name> origin/<base>`
+3. Create the worktree, branched from the base — or, for a `STACK` unit, from its parent:
+
+   ```bash
+   # WORK / GROUP unit — unchanged
+   git worktree add .worktrees/<working-name> -b <working-name> origin/<base>
+
+   # STACK unit — branch from the parent's REMOTE branch
+   git worktree add .worktrees/<working-name> -b <working-name> origin/<parent working name>
+   ```
+
+   Use the parent's **remote** name (`Fix-I60-F3-…`), never its local one. Phase 6 renames the
+   local branch to carry the PR number (`PR68-Fix-I60-F3-…`); the remote name is the stable
+   identifier and is what the parent's PR actually points at.
+
+   Record `git rev-parse origin/<parent working name>` now — Phase 5 writes it into the PR
+   body, and it is the value `/work-issue restack` needs later. Capture it before doing any
+   work, so it names the commit this branch was actually cut from.
 4. `cd` into it. **Every** subsequent edit, build, test, and git command runs inside this worktree. Never edit files in the main checkout or a sibling worktree.
 
 The worktree directory takes the **working** name, not the final one — the PR number isn't known yet, and the directory is torn down in Phase 6 before the mismatch matters.
@@ -146,7 +166,28 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
 ## Phase 5: Push and open the PR
 
 1. `git push -u origin <working-name>` — the remote branch keeps this name permanently.
-2. `gh pr create --title "<title>" --body "<body>"`. The body must contain `Fixes #<n>` so GitHub links the issue, and should name the finding ID (`Addresses F3 from the project review`) when there is one.
+2. `gh pr create --title "<title>" --body "<body>"`. The body must contain `Fixes #<n>` so
+   GitHub links the issue, and should name the finding ID (`Addresses F3 from the project
+   review`) when there is one.
+
+   **For a `STACK` unit**, run `gh pr create --base <parent working name> --title "<title>"
+   --body "<body>"` — the added `--base` is what points the PR at its parent instead of the
+   base branch — and include the stack marker in the body:
+
+   ```html
+   <!-- work-issue-stack
+   parent_pr: 68
+   parent_branch: Fix-I60-F3-rust-ps-path
+   parent_head: 1a2b3c4d5e6f7890abcdef1234567890abcdef12
+   -->
+   ```
+
+   `parent_head` is the sha captured in Phase 3. The PR body is the only durable home for it:
+   the worktree is gone by the end of Phase 6, and the local branch may be deleted after the
+   merge. Without it, `/work-issue restack` has to guess where the parent's commits end.
+
+   Never write a marker with an inferred value. If the parent's PR number isn't known yet
+   because its `gh pr create` failed, this unit doesn't get created either — report and stop.
 3. Capture the PR number from the command's output. If PR creation fails, stop here — do not rename, do not tear down, do not comment. The worktree stays exactly as it is and the failure gets reported.
 4. **Post the resolution comment** — one per issue in the unit, composed per "The resolution comment" above.
    1. **Check for an existing one first.** From the Phase 1 `gh issue view` result (or a fresh one), scan every comment for a `<!-- work-issue-resolution` marker naming this same `pr:`. If one exists, skip that issue and report it — never post a second comment for the same PR.
@@ -182,6 +223,22 @@ gh pr checkout 68 --branch PR68-Fix-I60-F3-rust-ps-path                         
 
 **Gotcha after the rename:** `git push` with git's default `push.default=simple` refuses to push when the local branch name differs from its upstream's name, which is exactly the state Phase 6 leaves behind. To push more commits to the same PR, use an explicit refspec: `git push origin HEAD:<working-name>`. This is the main reason the rename is the *last* step rather than an early one.
 
+### Restacking a child by hand
+
+When a stacked PR's parent merges, replay only the child's own commits onto the base, using
+the `parent_head` recorded in the child PR's `work-issue-stack` marker:
+
+```bash
+git fetch origin
+git rebase --onto origin/<base> <parent_head> <child branch>
+git push --force-with-lease
+```
+
+`--onto` with the recorded sha is what makes this independent of how the parent was merged. A
+plain `git rebase origin/<base>` works when the parent was rebase-merged and **conflicts on
+untouched lines** when it was squash-merged with more than one commit. Verified by
+`work-issue/restack-recipe.test.sh`.
+
 ## Batch mode
 
 For "every open issue not already addressed by a PR":
@@ -197,7 +254,7 @@ For "every open issue not already addressed by a PR":
 
    Report the excluded issues by number and title. A deferred issue that silently never appears reads as "nothing left to do" when the truth is "you decided not to do these" — and a mistakenly-labelled issue would otherwise stay invisible forever.
 2. Run Phase 2's three checks per issue; report the skips as a list with the reason each fired.
-3. **Order the queue using the `issue-triage` protocol.** Read `~/.claude/skills/issue-triage/SKILL.md` and execute its Phases 2–5 against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Do **not** try to invoke it through the Skill tool — `issue-triage` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/issue-triage` or by reading its protocol file directly, which is what this step does.
+3. **Order the queue using the `issue-triage` protocol.** Read `~/.claude/skills/issue-triage/SKILL.md` and execute its Phases 2–5, including Phase 4.5, against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Do **not** try to invoke it through the Skill tool — `issue-triage` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/issue-triage` or by reading its protocol file directly, which is what this step does.
 
    Run it fresh every time — never read a previous `.claude/tmp/issue-triage/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
 
@@ -205,6 +262,8 @@ For "every open issue not already addressed by a PR":
    |---|---|
    | `WORK n` | Work it alone, at position n. |
    | `GROUP` | Work all its issues on **one** worktree, one branch, one PR — see the grouped-unit naming above. Never split a group into consecutive single runs; the second branch would be cut from `main` and conflict with the first by construction. |
+   | `STACK` | Work it on a branch cut from its parent's remote branch, PR based on that branch. The parent is always earlier in the same run, so its branch already exists — batch mode is sequential. |
+   | `HOLD` | Report as held for the next batch, naming the chain it overlaps, and skip. Not a deferral: nothing is wrong with the issue, it just exceeds the depth cap. |
    | `NEEDS-DECISION` | **Halt and ask.** Present the question and the options the issue names. Do not implement, do not guess, do not skip silently. |
    | `DEFER` | Report as a deferral proposal and skip. Never apply the label. |
    | `CLOSE-MOOT` | Report the proposal with its evidence and skip. Never close the issue. |
@@ -212,7 +271,19 @@ For "every open issue not already addressed by a PR":
    If `~/.claude/skills/issue-triage/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
 4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
 5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, comment posted y/n, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
-6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit opens a real PR.
+6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit
+   opens a real PR. The plan names each unit's base explicitly, so a stack is visible before
+   anything is pushed:
+
+   ```
+     #11  WORK              base: main
+     #15  STACK on #11      base: Fix-I11-F2-config-parse
+     #18  STACK on #15      base: Fix-I15-F9-config-validate
+     #21  HOLD              overlaps the #11 -> #15 -> #18 chain, held to next batch
+   ```
+
+   Stacking needs no flag. It is what the triage already decided; the plan is where it
+   becomes visible.
 
 ## Next in the pipeline
 
@@ -241,6 +312,13 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 * Never work a deferred issue in batch mode, and never strip a deferral label to make an issue eligible. Deciding something is worth doing now is the user's call; the label is that decision already recorded. A single explicit `/work-issue <n>` may override it, but only after asking.
 * **`status: needs-decision` is not a deferral label.** `/issue-triage label` applies it for visibility in the GitHub UI; it is not in `DEFERRAL_LABELS` and must never be added to it. Never skip an issue for carrying it and never remove it. Batch mode derives the `NEEDS-DECISION` disposition fresh from the triage protocol on every run, which is what makes the halt correct — a label left behind after the decision was answered would otherwise block the issue silently and permanently. Read the disposition, not the label.
 * Stop and report rather than guess when `gh` fails (auth, rate limit) or the issue number doesn't exist. No silent retries.
+* Never cut a `STACK` unit's branch from the base. The whole point is that it sees its
+  parent's changes while the code is being written; branching from the base silently produces
+  exactly the conflict this disposition exists to prevent.
+* Never write a `work-issue-stack` marker with a guessed `parent_head`. If the sha wasn't
+  captured in Phase 3, re-derive it with `git rev-parse origin/<parent branch>` before the
+  branch has any commits of its own — never after.
+* Never stack onto a parent whose PR failed to open. No parent PR, no child.
 
 ---
 

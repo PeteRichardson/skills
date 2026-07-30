@@ -53,7 +53,7 @@ Check the invocation before doing anything else:
 * **`/issue-triage label`**, or **`/issue-triage label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run a triage.
 * **`/issue-triage`** (no args) — full-queue run, proceed to Phase 1.
 * **`/issue-triage #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
-* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5 directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
+* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5, including Phase 4.5, directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
 
 ## Phase 1: Enumerate the eligible set
 
@@ -376,7 +376,7 @@ The intended loop:
 1. `/project-review` or `/code-review` — find the work
 2. `/make-issues` (or `backfill`) — file it, with labels and fingerprints
 3. `/issue-triage` — decide what to work, in what order, what to combine, what to drop
-4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5 as a sub-protocol to order its queue)
+4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5, including Phase 4.5, as a sub-protocol to order its queue)
 5. `/pr-triage` — order the resulting PR queue
 6. Merge manually in the recommended order
 
