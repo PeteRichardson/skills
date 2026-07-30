@@ -246,8 +246,10 @@ Immediately before `## Phase 5: Deliverable` in `issue-triage/SKILL.md`, insert:
 Phase 4 produced an order. This phase reads it and decides which units branch from the base
 and which branch from the unit before them.
 
-Walk the ordered list from position 1. For each unit, look for an `OVERLAPS` edge (from
-Phase 2) to any unit ranked **earlier** in this same order:
+Walk the ordered list from position 1, considering only units Phase 3 dispositioned `WORK`.
+`GROUP` units are skipped — a `GROUP` can be a parent, but is never itself converted. For
+each `WORK` unit, look for an `OVERLAPS` edge (from Phase 2) to any unit ranked **earlier**
+in this same order:
 
 * **No earlier overlap** → stays `WORK`. Branches from the base, as today.
 * **An earlier overlap** → becomes `STACK`, parented to the **nearest** such unit. It gets

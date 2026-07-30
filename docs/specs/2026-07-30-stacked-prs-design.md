@@ -93,8 +93,9 @@ Phase 4.5, by converting units Phase 3 already dispositioned `WORK`.
 **The parent is determined by order, not by disposition**, so this needs a new phase rather
 than a change to Phase 3:
 
-> **Phase 4.5: Form stacks.** After Phase 4 has ranked the units, walk the ordered list. For
-> each unit with an `OVERLAPS` edge to any earlier unit, mark it `STACK` on the *nearest*
+> **Phase 4.5: Form stacks.** After Phase 4 has ranked the units, walk the ordered list,
+> considering only units Phase 3 dispositioned `WORK` (`GROUP` units are skipped). For each
+> such unit with an `OVERLAPS` edge to any earlier unit, mark it `STACK` on the *nearest*
 > such unit. A unit with no earlier overlap stays `WORK`. Chains form transitively: if #15
 > stacks on #11 and #18 overlaps #15, #18 stacks on #15 — that's a depth-3 chain.
 
