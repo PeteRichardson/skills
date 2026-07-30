@@ -103,8 +103,10 @@ Override the script's cascade in exactly these cases, and say why when you do:
 * **It recommends `/make-issues` but no review report is fresh enough to file from** — the
   script only checks `PROJECT_REVIEW.md`'s commit drift. If the only report is a
   `/code-review` of a scope that has since been rewritten, say so.
-* **It recommends merging but the top PR has never been reviewed** — `/code-review` on that
-  PR comes first.
+* **It recommends merging but the top PR has never been reviewed** — `/code-review <pr>`
+  comes first. A PR counts as reviewed if `docs/reviews/code-review_PR<n>_*.md` exists and
+  postdates the PR's last push; the script checks only for the file's existence, so a report
+  older than the newest commit on that PR is one you should call out.
 
 Where the recommendation depends on a judgment the user might disagree with, say what the
 alternative is in a clause, not a paragraph. One recommendation, not a menu.

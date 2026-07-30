@@ -1,19 +1,20 @@
 ---
 name: code-review
-description: Comprehensive code review of a repository scope. Analyzes code across HIGH (security, memory, crashes), IDIOM (language best practices), MEDIUM (inefficiencies), and LOW (style) categories. Issues ranked by importance; all HIGH shown plus top IDIOM+MEDIUM up to 10 total. Reports saved as markdown snapshots in docs/reviews/ (not committed). Use when you want to review a folder/file, pick one issue at a time, and work through them incrementally across multiple sessions.
+description: Comprehensive code review of a repository scope or a GitHub pull request. Analyzes code across HIGH (security, memory, crashes), IDIOM (language best practices), MEDIUM (inefficiencies), and LOW (style) categories. Issues ranked by importance; all HIGH shown plus top IDIOM+MEDIUM up to 10 total. Reports saved as markdown snapshots in docs/reviews/ (not committed). Use when you want to review a folder/file, pick one issue at a time, and work through them incrementally across multiple sessions. Also use when the user types /code-review 68, /code-review #68, or /code-review PR68, says "review PR 68", "review this pull request", "code review the PR before I merge it", or passes a GitHub pull request URL.
 ---
 
 # Comprehensive Code Review
 
-Analyze a specified scope of code (folder, file, or pattern) and generate a prioritized report of issues, categorized by severity and importance. Reports are session-independent markdown snapshots, allowing you to reference issues by name and work through them incrementally.
+Analyze a specified scope of code (folder, file, or pattern) — or the change proposed by a GitHub pull request — and generate a prioritized report of issues, categorized by severity and importance. Reports are session-independent markdown snapshots, allowing you to reference issues by name and work through them incrementally.
 
 ## Quick Start
 
 ```
-/code-review src/
+/code-review src/          # review a scope of the working tree
+/code-review 68            # review what PR #68 proposes
 ```
 
-Scans all code files in `src/`, generates a report in `docs/reviews/code-review_src_YYYY-MM-DD.md`, and displays it.
+Scans the target, generates a report in `docs/reviews/code-review_[TARGET]_YYYY-MM-DD.md`, and displays it.
 
 ## Commands
 
@@ -25,6 +26,19 @@ Scans all code files in `src/`, generates a report in `docs/reviews/code-review_
 - **SCOPE**: folder path (`src/`), file path (`src/memory.cpp`), glob (`src/**/*.rs`)
 - **Output**: Report saved to `docs/reviews/code-review_[SCOPE]_[DATE].md`
 - **Display**: Issues printed to console, ready to work through
+
+### Review a pull request
+```
+/code-review [PR]
+```
+
+- **PR**: bare number (`68`), `#`-prefixed (`#68`), `PR`-prefixed (`PR68`), or a full GitHub PR URL
+- **Output**: Report saved to `docs/reviews/code-review_PR[N]_[DATE].md`
+- **Scope of findings**: only lines the PR added or modified — see [PR mode](#pr-mode) below
+
+Requires `gh` authenticated. The working tree is never touched: nothing is checked out, no branch is created, no worktree is added.
+
+**Mode detection:** a bare integer, `#N`, `PRN`, or a PR URL is always a PR, never a path. If `gh pr view` can't resolve it, say what was tried and stop — don't fall back to treating it as a scope, since that turns an auth or wrong-repo problem into a confusing "no files found" error.
 
 ### Focus on specific categories
 ```
@@ -50,6 +64,8 @@ Scans all code files in `src/`, generates a report in `docs/reviews/code-review_
 
 Generates a new report with current line numbers. Use when the previous report's line numbers have drifted after several fixes.
 
+In PR mode, `--refresh` re-fetches the PR head — which may have gained commits since the last run — and writes a new dated report against it.
+
 ### Continue mid-session
 ```
 I fixed [ISSUE NAME], what's next?
@@ -73,6 +89,44 @@ Retrieves the issue from the saved report and locates it in current code (handle
 ```
 Show me the SQL injection in parse_user_id again
 ```
+
+## PR mode
+
+Everything below this section — tiers, IDIOM scoring, the reporting rule, the report format — is identical in both modes. PR mode differs only in **where the code comes from** and **which lines are eligible to be findings**.
+
+### Gathering the code
+
+```bash
+gh auth status                     # hard requirement; stop with a clear message if it fails
+gh pr view <n> --json number,title,state,isDraft,author,baseRefName,headRefName,\
+                     headRefOid,baseRefOid,additions,deletions,changedFiles,url
+git fetch origin pull/<n>/head     # works for fork PRs too; creates no local branch
+git merge-base <baseRefOid> <headRefOid>
+gh pr diff <n>                     # the hunks
+git show <headSha>:<path>          # full-file context, per changed file
+```
+
+Read full files for context via `git show` against the fetched sha. Nothing is checked out, so the working tree stays exactly as it was and there's no teardown step to forget.
+
+Diff against the **merge base**, not the base branch tip. Otherwise commits that landed on the base branch after this PR branched get attributed to the PR.
+
+| PR state | What to do |
+|---|---|
+| Open | Proceed |
+| Draft | Proceed; note draft status in the report header |
+| Merged or closed | Say so and ask before continuing — legitimate, but usually a mistake |
+
+The 30-file threshold applies to `changedFiles`. Deleted files are reviewed from the diff alone (there's no file at head to read). Skip binaries, lockfiles, and generated files, and **list what was skipped** so the reader knows they weren't silently dropped.
+
+### Which lines can be findings
+
+Report findings only on lines the PR **added or modified**. The point of PR mode is to answer "is this change sound," not to re-litigate the files it happens to touch.
+
+**One exception:** a problem the PR *causes* on a line it didn't touch — a changed function contract that breaks an existing caller, a renamed field an untouched serializer still writes. Report those with an extra `**Introduced by:**` field naming the hunk responsible. A finding on an untouched line without that field is out of scope by definition.
+
+Pre-existing issues on untouched lines aren't ranked and don't consume report slots. List at most **three** of them under **Out of scope (pre-existing)** at the end of the report — name and location only, no evidence blocks. The reader wants to know they were seen and set aside. The cap is what stops that section from growing back into the scope-mode report PR mode exists to avoid.
+
+That section is a pointer, not a work queue: `/make-issues` deliberately skips it, since entries with no tier, severity, or evidence can't become an issue without inventing all three. `/code-review <path>` in scope mode is how one becomes filable.
 
 ## Issue Categories & Importance
 
@@ -133,6 +187,7 @@ docs/
     ├── code-review_src_2025-06-04.md   (initial report)
     ├── code-review_src_2025-06-10.md   (refreshed report)
     ├── code-review_app_2025-06-05.md   (different scope)
+    ├── code-review_PR68_2026-07-30.md  (PR mode — same pattern, so also gitignored)
     └── PROJECT_REVIEW.md               (from /project-review — committed, not gitignored)
 ```
 
@@ -142,6 +197,7 @@ docs/
 - Allows cross-session continuation: come back days later and reference by name
 - Each date has a separate report; `/code-review --refresh` generates a new dated report
 - Frontmatter (`git_sha`, `generated_at`, `scope`) lets `/project-review` check whether findings are still current before treating them as evidence — see "Integration with /project-review" below
+- PR reports add a `pr:` frontmatter key. Its **presence** is the marker meaning "this report describes code that isn't on the base branch yet" — three downstream consumers key on it (see [Report Structure](#report-structure))
 
 ## Workflow Example
 
@@ -240,9 +296,52 @@ scope: src/
 - Or file them all: `/make-issues docs/reviews/code-review_[SCOPE]_[DATE].md`
 ```
 
+### PR mode differences
+
+The structure above is unchanged. PR mode adds three things.
+
+**1. Frontmatter is a superset** of the three scope-mode keys, so every existing consumer keeps working without a new parser:
+
+```yaml
+---
+git_sha: 9f8e7d6           # the PR head sha — the commit the line numbers refer to
+generated_at: 2026-07-30T14:32:00-07:00
+scope: PR #68
+pr: 68                     # presence of this key marks an unmerged-branch report
+pr_base_ref: main
+pr_base_sha: 1a2b3c4       # the merge base, not the base branch tip
+---
+```
+
+`git_sha` must be the **PR head sha**, not local `HEAD`. That's what keeps `/project-review`'s and `/make-issues`' per-file staleness checks pointed at the commit the line numbers were computed against, rather than at a commit that never contained this code.
+
+The header block gains PR title, author, state (marking drafts), and ± line counts.
+
+**2. Findings on untouched lines carry `**Introduced by:**`** naming the hunk responsible:
+
+```markdown
+### 3. [Issue name] (MEDIUM) — Importance: S/6
+**Location:** path/caller.ext:LINE  *(not modified by this PR)*
+**Introduced by:** path/api.ext:LINE — [the change that breaks this]
+```
+
+**3. An Out of scope section**, capped at three entries, after the Summary:
+
+```markdown
+## Out of scope (pre-existing)
+
+Not introduced by this PR and not counted above:
+- [Issue name] — path/file.ext:LINE
+- [Issue name] — path/other.ext:LINE
+```
+
 ## Next in the pipeline
 
-This skill is stage 1 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`), alongside `/project-review`. After displaying the report, print the next step as the last line:
+Which stage this skill occupies depends on the mode. **Scope mode is stage 1** (find the work) of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`), alongside `/project-review`. **PR mode is stage 6** (the line-level pass before merging), so it hands off differently.
+
+### Scope mode
+
+After displaying the report, print the next step as the last line:
 
 > Next: fix one now ("Let's fix [issue name]"), or `/make-issues docs/reviews/code-review_src_2026-07-21.md` to file the whole report as GitHub issues.
 
@@ -251,6 +350,16 @@ Use the real report path, not a placeholder — `/make-issues` needs it verbatim
 * **No GitHub remote** — omit the `/make-issues` half; the fix-one-now path still applies.
 * **`--focus idiom` run** — mention that IDIOM findings carry a derived severity, so they order alongside everything else once filed rather than landing in a separate bucket.
 
+### PR mode
+
+Point at the branch, not at stage 2 — a finding about a PR is usually cheapest to fix inside that PR:
+
+> Next: fix these on the branch so they land with the PR (`git fetch origin pull/68/head && git checkout -b review-68 FETCH_HEAD`), or `/make-issues docs/reviews/code-review_PR68_2026-07-30.md` for anything you'd rather not block the merge on.
+
+`/make-issues` is the fallback for **ranked** findings that shouldn't hold up the merge. Filing a stage-6 finding as an issue means it comes back around as its own PR later — the right call for genuine scope creep, the wrong one for "this PR has a bug." So lead with the branch.
+
+The **Out of scope (pre-existing)** entries are not filable and `/make-issues` skips them by design: they carry no tier, severity, or evidence, so filing one means inventing all three. If any of them looks worth tracking, add a third line pointing at scope mode for the file in question — `/code-review path/to/file.ext` produces a real finding that `/make-issues` can then file.
+
 ## When to use
 
 - **Starting a code review of a new/unfamiliar codebase** — Get a comprehensive overview of all issues
@@ -258,6 +367,7 @@ Use the real report path, not a placeholder — `/make-issues` needs it verbatim
 - **Security review** — Focus on HIGH issues (`--focus high`)
 - **Picking up where you left off** — Reference issues by name from saved report
 - **Routine code quality checks** — Refresh the review (`--refresh`) after a while
+- **Before merging a PR** — `/code-review 68` for the stage-6 line-level pass, with a report you can work from. Use the built-in `/review` instead when you just want a quick prose read and don't need an artifact
 
 ## Safety & Limits
 
@@ -269,6 +379,11 @@ If you see this, either:
 - Use a language filter: `/code-review src/ --language rust`
 - Or confirm that you want to scan all files
 
+In PR mode the same threshold applies to the PR's `changedFiles`. There's no narrowing option there — either confirm, or review the PR in parts by asking for specific paths.
+
+### PR mode preconditions
+`gh` must be authenticated (`gh auth status`). A PR that can't be resolved stops the run with what was tried. Merged and closed PRs prompt before proceeding.
+
 ### Language detection
 Auto-detected from file extensions (`.cpp` → C++, `.py` → Python, `.rs` → Rust, etc.)
 
@@ -278,18 +393,20 @@ If the detection is wrong, it can be adjusted in future versions with a `--langu
 
 The skill works by:
 
-1. **Discovering files** in the specified scope matching code file extensions
-2. **Detecting languages** from file extensions
-3. **Checking file count** against the 30-file threshold
-4. **Reading file contents** and sending to Claude for analysis
-5. **Analyzing via Claude API** using a detailed system prompt that instructs Claude to:
+1. **Resolving the target** — PR mode if the argument is `68` / `#68` / `PR68` / a PR URL, scope mode otherwise
+2. **Discovering files** — scope mode: files in the scope matching code file extensions. PR mode: the PR's changed files, via `gh pr view` + `git fetch origin pull/<n>/head`
+3. **Detecting languages** from file extensions
+4. **Checking file count** against the 30-file threshold (PR mode: `changedFiles`)
+5. **Reading file contents** and sending to Claude for analysis — scope mode reads the working tree; PR mode reads `git show <headSha>:<path>` plus `gh pr diff` for the hunk boundaries, and never checks anything out
+6. **Analyzing via Claude API** using a detailed system prompt that instructs Claude to:
    - Identify all issues in each category (HIGH, IDIOM, MEDIUM, LOW)
    - Score IDIOM issues on three dimensions
    - Rank IDIOM+MEDIUM by composite importance
+   - In PR mode, restrict findings to added/modified lines, except those carrying `Introduced by:`
    - Return structured JSON data
-6. **Generating markdown report** with ranked issues, prefixed with a frontmatter block recording `git_sha` (`git rev-parse HEAD`), `generated_at` (current timestamp), and `scope` (the SCOPE argument) — this lets `/project-review` check per-file staleness later
-7. **Saving to docs/reviews/** with ephemeral status (not committed)
-8. **Managing session state** to track which issues you've fixed
+7. **Generating markdown report** with ranked issues, prefixed with a frontmatter block recording `git_sha` (scope mode: `git rev-parse HEAD`; PR mode: the PR head sha), `generated_at` (current timestamp), and `scope` (the SCOPE argument, or `PR #<n>`) — this lets `/project-review` check per-file staleness later. PR mode also records `pr`, `pr_base_ref`, and `pr_base_sha`
+8. **Saving to docs/reviews/** with ephemeral status (not committed)
+9. **Managing session state** to track which issues you've fixed
 
 ## Session State Management
 
@@ -331,11 +448,14 @@ Save the report path and reference issues by name days or weeks later. The skill
 
 Keeping the frontmatter accurate is the only thing this skill needs to do to support that integration — no other behavior changes.
 
+**PR reports are excluded from that ingestion.** `/project-review` audits the repo as it exists; a PR report describes code that isn't on the base branch yet, so treating it as evidence would attribute unmerged findings to `main`. Phase 1.5 skips any report whose frontmatter carries `pr:`. Two other consumers key on the same marker: `pipeline-status` leaves PR reports out of its stage-1 "is there a current review" check (a stage-6 review isn't stage-1 work), and `/make-issues` compares against the PR head rather than local `HEAD` in its staleness pre-check, which would otherwise warn on every PR report since the two are different branches by construction.
+
 ## Limitations
 
 - **Large codebases**: Scoping to a specific folder/file is recommended for repos >1000 files
 - **Token budget**: Analyzing many files at once may exceed API limits; use `--language` or folder scoping to reduce scope
 - **Line number drift**: After many edits, old reports' line numbers become inaccurate; use `--refresh` to rescan
+- **PR mode reads only**: no tests are run against the PR — that's CI's job, and needing it is what would force a worktree. One PR per run; merge-order questions across several PRs are `/pr-triage`'s
 
 ## Troubleshooting
 
@@ -345,12 +465,16 @@ Keeping the frontmatter accurate is the only thing this skill needs to do to sup
 | No issues detected | Check file extensions, verify language detection in console output |
 | Can't find an old issue | Use `--refresh` to generate a new report with current line numbers |
 | Line numbers don't match | Report is stale; run `--refresh` after many edits |
+| PR mode line numbers don't match your checkout | Expected — they're at the PR head, not your `HEAD`. `git fetch origin pull/<n>/head && git checkout -b review-<n> FETCH_HEAD` to see them |
+| `/code-review 68` says it can't resolve the PR | Check `gh auth status` and that you're in the right repo. The skill won't fall back to treating `68` as a path |
+| PR mode reports nothing on files you know it changed | Findings are limited to added/modified lines. Pre-existing problems appear (capped at 3) under **Out of scope** |
 
 ## Future Enhancements
 
 - `--language [LANG]` flag to override auto-detection
 - `.status.json` tracking to see which issues you've fixed over time
-- `--since COMMIT` for diff-based review of recent changes
+- `--since COMMIT` for diff-based review of recent local changes (PR mode's line-scoping logic, pointed at a local range)
+- PR mode `--refresh` showing what changed since the last report, rather than just regenerating
 - `--exclude [CATEGORY]` to filter out certain issue types
 - Git hook integration for pre-commit reviews
 - Cached analysis for unchanged files

@@ -34,6 +34,7 @@ Dedup is best-effort, not perfect. Matching on file path + keyword overlap will 
    - **Code-review**: filename matches `code-review_*.md` and/or frontmatter is the `git_sha` / `generated_at` / `scope` shape, with `### N. [Issue name]` section headings instead of a table.
    - Matches neither shape → stop and say so explicitly. Do not fall back to guessing a parser.
 4. **Staleness pre-check** (both formats carry frontmatter that supports this): if the source's recorded `git_sha`/commit context predates the current `HEAD` for any file a finding cites, warn once, listing which findings might have drifted line numbers — but don't block. This is advisory, matching how `/project-review`'s own Phase 1.5 treats `/code-review` staleness.
+   - **PR-mode reports are checked differently.** A `/code-review` report with a `pr:` frontmatter key (filename `code-review_PR68_*.md`) describes an unmerged branch: its `git_sha` is the PR head, which by construction isn't in the current branch's history. Comparing it against local `HEAD` would flag every such report as stale, every time. Instead, check the recorded `git_sha` against the PR's current head (`gh pr view <pr> --json headRefOid`) — that catches the real staleness case, which is the PR having gained commits since the review — and note in the run summary that these findings are against an unmerged branch, so the file paths are current but the line numbers refer to the PR head rather than to `HEAD`.
 
 ## Phase 1: Parse findings into a common record shape
 
@@ -53,6 +54,7 @@ Every finding, regardless of source, is normalized to: `{ id_or_ordinal, title, 
 - `categories[]`: IDIOM tier → always `["IDIOM"]`. Otherwise, resolve via Phase 4's category resolution steps — biased by tier as a prior (HIGH usually → Security hygiene, Correctness & memory safety (crashes/leaks/UAF), or Data integrity & robustness (silent data loss without a crash); MEDIUM/LOW usually → Error handling & observability, Performance & resource hygiene, Architectural decay, Consistency rot, or Documentation drift, depending on content) but not forced; pick whatever actually fits the text.
 - `effort_or_null` = null always (code-review has no effort concept).
 - Scope: default = every finding in the report (already curated to ~10 by `/code-review` itself — a second severity filter adds little). `--all` = same, accepted as a no-op rather than rejected. `-f 1 3` = only those ordinals, scoped to this one report file; report and skip any not found.
+- **Never file the `## Out of scope (pre-existing)` section** that PR-mode reports carry. Those entries are names and locations only — no tier, no severity, no evidence — so filing them means inventing two labels and an issue body, and an inferred value is a bug (see `WORKFLOW.md`). Say in the run summary how many were listed and skipped, and that `/code-review <those paths>` turns them into real findings that this skill can file.
 
 ## Phase 2: Compose each candidate issue
 

@@ -94,7 +94,11 @@ fi
 # ---------------------------------------------------------------- stage 1: reviews
 
 PR_REVIEW="docs/reviews/PROJECT_REVIEW.md"
-CR_REVIEW=$(newest "docs/reviews/code-review_*.md")
+# PR-mode reports (code-review_PR68_*.md) are excluded: they review an unmerged branch
+# at stage 6, not this repo's code at stage 1. Counting one as "there is a current
+# review" would report the work as found when nothing has been reviewed on HEAD at all.
+CR_REVIEW=$(ls -t docs/reviews/code-review_*.md 2>/dev/null \
+            | grep -v '/code-review_PR[0-9]\{1,\}_' | head -1)
 REVIEW_LINES=()
 REVIEW_STALE=0
 REVIEW_BEHIND=0
@@ -217,6 +221,8 @@ next_step() {
   fi
   if [[ $PRS_OPEN -ge 1 && -n $PT_TOP ]]; then
     echo "review and merge #$PT_TOP, then re-run /pr-triage  —  every merge invalidates the rest of the order"
+    [[ -z $(newest "docs/reviews/code-review_PR${PT_TOP}_*.md") ]] &&
+      echo "     (/code-review $PT_TOP for the line-level pass first — it has no review report yet)"
     return
   fi
   if [[ $PRS_OPEN -eq 1 ]]; then

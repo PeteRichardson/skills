@@ -18,7 +18,7 @@ The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 | 3 | Decide what to work | `/issue-triage` | Disposition per issue + ordered work units | `.claude/tmp/issue-triage/ISSUE_TRIAGE.md` |
 | 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit | Branches `Fix-I<n>-…` (remote) / `PR<n>-Fix-I<n>-…` (local), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/pr-triage` | Blast-radius-ranked merge sequence | `.claude/tmp/pr-triage/PR_TRIAGE.md` |
-| 6 | Merge | **manual**, in the stage-5 order | Merged PRs, auto-closed issues | Git history |
+| 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
 
 Then loop: a fresh `/project-review` after a batch of merges is how the next round starts.
 
@@ -76,6 +76,12 @@ Two different tools, and they compose rather than compete:
 - **`/code-review <scope>`** — line-level review of a folder/file/glob. Tiered
   HIGH/IDIOM/MEDIUM/LOW, ~10 findings, ordinals instead of stable IDs, no effort estimate.
   Report goes to `docs/reviews/code-review_<scope>_<date>.md`.
+
+`/code-review` also takes a PR number, but **that is stage 6, not stage 1** — it reviews a
+proposed change rather than the repo, and its report carries a `pr:` frontmatter key marking
+it as describing code that hasn't merged. `/project-review`'s Phase 1.5 and `pipeline-status`
+both skip PR reports for that reason, so running one never makes it look like this round's
+work has been found.
 
 Run `/code-review` first if you want the detail to feed the audit — `/project-review`'s
 Phase 1.5 ingests existing code-review reports as evidence. Run it after, scoped to a
@@ -212,7 +218,12 @@ ones where a careless rebase resolution merges cleanly and is still wrong.
 
 Deliberately not automated. Work down the stage-5 sequence one PR at a time:
 
-1. `/code-review` (or `/review`) the specific PR for the line-level pass, if it hasn't had one.
+1. `/code-review 68` for the line-level pass, if the PR hasn't had one. PR mode reviews only
+   the lines the PR added or modified, never checks anything out, and leaves
+   `docs/reviews/code-review_PR68_<date>.md` behind. Fix what it finds on the branch so it
+   lands with the PR; `/make-issues <that report>` is for findings you'd rather not block the
+   merge on. The built-in `/review` is the alternative when you want a quick prose read and
+   no artifact.
 2. Merge it on GitHub. `Fixes #<n>` in the body closes the issue(s) automatically.
 3. **Re-run `/pr-triage`** — repeat-run mode re-ranks what's left against the new base and
    tells you what changed. The previous order is invalidated by every merge; don't work down
@@ -244,7 +255,7 @@ Or by hand:
 
 | Question | Check |
 |---|---|
-| Is there a current review? | `ls -lt docs/reviews/` — compare its date against `git log -1` |
+| Is there a current review? | `ls -lt docs/reviews/` — compare its date against `git log -1`. `code-review_PR*.md` files are stage-6 PR reviews, not stage-1 work |
 | Were the findings filed? | `gh issue list --state all --label "source: project-review" --label "source: code-review"` |
 | Which issues are untriaged? | `/issue-triage list` — outstanding units vs. `gh issue list --state open` |
 | Is anything blocked on me? | The `NEEDS-DECISION` / `DEFER` / `CLOSE-MOOT` sections of the latest `ISSUE_TRIAGE.md` |
@@ -270,6 +281,11 @@ report, use the inner loop. The finding ID stays useful in commit messages.
 stage 3 onward as normal. IDIOM findings carry a derived severity so they order alongside
 everything else.
 
+**Someone else's PR, or your own PR that didn't come from an issue.** Stages 1–5 don't apply
+— there's no finding, no issue, and nothing to order. Go straight to stage 6:
+`/code-review <pr>`, fix on the branch, merge. The report's `scope: PR #<n>` frontmatter is
+the only trace it leaves, and no other stage reads it.
+
 **Small queue.** Under ~3 issues, stage 3 earns little — but run it anyway if any two touch
 the same file, since `GROUP` is what stops you from opening two PRs that conflict by
 construction. Under ~3 PRs, stage 5 earns little; blast radius on a queue of two is trivial.
@@ -282,6 +298,11 @@ Each of these is a decision that belongs to you, and every skill involved is wri
 surface it rather than take it:
 
 - **Merge anything.** `/pr-triage` is advisory, full stop.
+- **Say anything on your behalf on a PR.** `/code-review <pr>` writes a local report and
+  stops — no review comment, no requested changes, no approval. Publishing a review is your
+  call. The pipeline's complete set of GitHub writes stays: `/make-issues` (issues and
+  fingerprint comments), `/issue-triage label` (one label, opt-in), and `/work-issue`
+  (branch, PR, per-issue resolution comment).
 - **Close or defer an issue.** `/issue-triage` proposes `CLOSE-MOOT` and `DEFER`; it never
   applies a `backlog` label or closes anything, and `/work-issue` won't act on those
   proposals either. `/issue-triage label` is the one sanctioned mutation, and it touches

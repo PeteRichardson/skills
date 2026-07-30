@@ -188,7 +188,7 @@ This skill is stage 5 of the review → issue → PR → merge pipeline (`~/.cla
 
 The re-run half is not optional boilerplate: a user working down a printed list without re-ranking is the specific failure this line exists to prevent. Vary it only for these cases:
 
-* **PR #1 hasn't had a line-level review** — put that first: `/code-review` (or `/review`) on that PR, then merge.
+* **PR #1 hasn't had a line-level review** — put that first: `/code-review 1`, then merge. (The built-in `/review` is the quick-prose alternative when no report is wanted.)
 * **PR #1 is already `CONFLICTING`** — say so; it needs author action before merging regardless of its position, and the next mergeable PR in the order is the real next step.
 * **A single-PR queue** — no order to work down. Say it's ready to review and merge, and skip the re-run line.
 
@@ -296,7 +296,7 @@ Plain `clean` only removes snapshots whose entire referenced PR set has since me
 
 ## How this fits with your other skills
 
-Run `/pr-triage` first when you're facing more than 2–3 open PRs and want a merge order, before touching any individual PR. Once you've picked the next PR to merge per its recommendation, use `/code-review` on that specific PR for the actual line-level review. If a PR the triage flags as a "likely semantic collision" ends up needing conflict resolution after an earlier merge, that's a good candidate for a future `/resolve-conflicts` skill (mechanical rebase + test run, escalating to you for anything flagged low-confidence) rather than doing it free-form.
+Run `/pr-triage` first when you're facing more than 2–3 open PRs and want a merge order, before touching any individual PR. Once you've picked the next PR to merge per its recommendation, use `/code-review <pr>` for the actual line-level review — it scopes findings to the lines that PR changed and leaves a report at `docs/reviews/code-review_PR<n>_<date>.md`. If a PR the triage flags as a "likely semantic collision" ends up needing conflict resolution after an earlier merge, that's a good candidate for a future `/resolve-conflicts` skill (mechanical rebase + test run, escalating to you for anything flagged low-confidence) rather than doing it free-form.
 
 ## Why blast radius instead of size or complexity
 
