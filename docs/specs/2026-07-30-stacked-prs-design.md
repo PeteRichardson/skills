@@ -217,12 +217,23 @@ Per child PR carrying a `work-issue-stack` marker:
 
 ### `/pr-triage` — stacks are a hard ordering constraint
 
-1. **Topological constraint.** A child never ranks above its parent. This joins the existing
-   critical-severity promotion as a rule that outranks blast radius — with the difference
-   that a stack violation isn't a preference, it's unmergeable.
-2. **Blast radius correction.** A child shares files with its parent *by construction*.
-   Exclude the parent from the child's blast-radius count, or every stack ranks itself to the
-   bottom of the queue for being a stack.
+0. **Queue membership.** A stacked child's `baseRefName` is its parent's branch, not the repo
+   base — Phase 1's existing same-base filter drops it before any of the rules below can see
+   it. The filter must also admit any PR whose `baseRefName` matches another open PR's
+   `headRefName`.
+1. **Topological constraint, satisfied as a block move.** A child never ranks above its
+   parent — this joins the existing critical-severity promotion as a rule that outranks blast
+   radius, with the difference that a stack violation isn't a preference, it's unmergeable.
+   The ascending blast-radius sort has no way to know about it on its own, so the algorithm is
+   explicit: a chain (parent plus every descendant) sorts as one block, positioned at its
+   root's blast-radius rank, then unpacks internally in link order (parent first). The
+   critical-severity promotion is the same block-move triggered by the critical tier instead
+   of a blast-radius rank — one rule, not two.
+2. **No blast-radius correction needed.** A stacked child's PR is opened against its parent's
+   branch (`gh pr create --base <parent branch>`), so `gh pr diff --name-only` already returns
+   only the child's own files — the parent's files never enter its overlap set. There's
+   nothing to subtract, and this holds after a restack too, since the restacked branch still
+   carries only the child's own commits.
 3. **Display.** Show chains as a unit, with children marked blocked until the parent merges,
    and the merge sequence naming the restack between links:
 

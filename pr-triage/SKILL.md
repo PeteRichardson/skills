@@ -55,7 +55,7 @@ Check the invocation before doing anything else:
 
 1. Confirm the repo and base branch (default `main`, ask if ambiguous).
 2. `gh pr list --state open --json number,title,author,headRefName,baseRefName,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,mergeStateStatus`
-3. Filter to PRs targeting the same base branch. Note their base commit — if they're not all based on the same commit, record how far each has diverged (`git log --oneline <base>..<pr-branch>` vs `git log --oneline <pr-branch>..<base>`).
+3. Filter to PRs targeting the same base branch, plus any PR whose `baseRefName` matches another open PR's `headRefName` — a stacked child targets its parent's branch by design, not the base, and the same-base filter alone would drop it before Phase 3 ever sees it, hiding the exact PR the merge order most needs to sequence. Note their base commit — if they're not all based on the same commit, record how far each has diverged (`git log --oneline <base>..<pr-branch>` vs `git log --oneline <pr-branch>..<base>`).
 4. Use `TodoWrite` to publish a plan (enumerate → overlap → rank → judge → deliver) so progress is visible on a large queue.
 
 ## Phase 2: Build the file-overlap matrix
@@ -80,15 +80,24 @@ marker carrying `resolved: true` entirely — that PR's stack was already unwoun
 unstacked PR: no parent constraint, no blast-radius correction. Then, for every remaining
 (unresolved) marker:
 
-1. **A child never ranks above its parent.** This is a hard constraint like `DEPENDS-ON` is in
-   `/issue-triage` Phase 4, and it outranks blast radius *and* the critical-severity
-   promotion below — a child promoted above its parent isn't a tradeoff, it's an unmergeable
-   order. If a critical-severity child would be promoted, promote the whole chain, parent
+1. **A chain sorts as one block.** A child never ranks above its parent — this is a hard
+   constraint like `DEPENDS-ON` is in `/issue-triage` Phase 4, and the ascending blast-radius
+   sort has no way to know about it on its own, so it needs an explicit rule to satisfy it: a
+   chain (the parent plus every descendant stacked on it, directly or transitively) moves as
+   one block, positioned at its root's — the parent's — blast-radius rank, then unpacks
+   internally in link order (parent first, then each child in stack order). Ties against
+   unrelated PRs at that same rank break by the existing tiebreakers, applied to the chain
+   root. The critical-severity promotion below is this same block-move, just triggered by the
+   critical tier instead of a blast-radius rank — one idea, not two competing rules: if any PR
+   in the chain qualifies for the critical tier, the whole chain promotes together, parent
    first, and say so.
-2. **Exclude a parent from its child's blast radius.** A stacked child shares files with its
-   parent by construction — that's why it was stacked. Counting that shared file penalizes
-   the chain for its own structure and sorts every stack to the back of the queue. Count only
-   the *other* open PRs it shares a file with.
+2. **No blast-radius correction is needed for a stacked child.** `/work-issue` opens a child's
+   PR with `gh pr create --base <parent branch>`, so Phase 2's `gh pr diff <N> --name-only`
+   diffs the child against its *parent's* branch, not the base — it returns only the child's
+   own files, and the parent's files never enter the child's overlap set in the first place.
+   There's nothing to subtract; don't invent a correction where none is needed. This holds
+   after a restack too: once `/work-issue restack` lands, the child's branch carries only its
+   own commits, so its file set is identical whether measured against the parent or the base.
 3. **Mark children blocked.** A child cannot merge until its parent does, and needs
    `/work-issue restack` in between.
 

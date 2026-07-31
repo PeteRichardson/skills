@@ -32,7 +32,7 @@ Copied verbatim from `docs/specs/2026-07-30-stacked-prs-design.md`. Every task's
 | `issue-triage/SKILL.md` | **Modify.** New Phase 4.5, `STACK`/`HOLD` dispositions, `stack:` snapshot block | 2 |
 | `work-issue/SKILL.md` | **Modify.** Phase 3 branches from parent, Phase 5 targets parent + writes marker, batch plan shows chains | 3 |
 | `work-issue/SKILL.md` | **Modify.** `restack` subcommand in Phase 0 + its own protocol section | 4 |
-| `pr-triage/SKILL.md` | **Modify.** Topological constraint in Phase 3, blast-radius correction, chain display in Phase 5 | 5 |
+| `pr-triage/SKILL.md` | **Modify.** Queue membership in Phase 1, topological constraint (block-move) in Phase 3, chain display in Phase 5 | 5 |
 | `pipeline/pipeline-status`, `WORKFLOW.md`, `pipeline/SKILL.md` | **Modify.** Detect restack-needed state; document the model and the stage-6 loop | 6 |
 
 Tasks 3 and 4 both modify `work-issue/SKILL.md` but are split because a reviewer could reasonably accept the stacking behavior while rejecting the force-pushing subcommand. Task 3 leaves the skill in a coherent state on its own: stacks get created, and the manual `git rebase --onto` recipe is documented for undoing them.
@@ -687,7 +687,7 @@ git commit -m "feat(work-issue): add restack subcommand for stacked PRs"
 ### Task 5: `/pr-triage` — stacks constrain the merge order
 
 **Files:**
-- Modify: `pr-triage/SKILL.md` — Phase 3 (line 71, the blast-radius computation and its tiebreakers), Phase 5 deliverable (line 111, the frontmatter schema and the merge table), and the "Next in the pipeline" variants (~line 191)
+- Modify: `pr-triage/SKILL.md` — Phase 1 (the same-base filter that would otherwise drop every stacked child), Phase 3 (line 71, the blast-radius computation and its tiebreakers), Phase 5 deliverable (line 111, the frontmatter schema and the merge table), and the "Next in the pipeline" variants (~line 191)
 
 **Interfaces:**
 - Consumes: the `work-issue-stack` marker (`parent_pr`) from Task 3, and `/work-issue restack` from Task 4.
@@ -703,24 +703,32 @@ grep -q 'restack' pr-triage/SKILL.md && echo PASS || echo FAIL
 
 Expected: `FAIL` twice.
 
-- [ ] **Step 2: Add stack detection and the ordering constraint to Phase 3**
+- [ ] **Step 2: Fix Phase 1's queue filter, then add stack detection and the ordering
+      constraint to Phase 3**
 
-Insert into Phase 3, before the "Tiebreakers" list:
+  Phase 1's existing same-base filter drops every stacked child before Phase 3 ever runs — a
+  child's `baseRefName` is its parent's branch, not the repo base. Amend it to also admit any
+  PR whose `baseRefName` matches another open PR's `headRefName`.
+
+  Insert into Phase 3, before the "Tiebreakers" list:
 
 ```markdown
 ### Stack constraint (hard, checked before ranking)
 
 Read each PR's body for a `<!-- work-issue-stack` marker and record its `parent_pr`. Then:
 
-1. **A child never ranks above its parent.** This is a hard constraint like `DEPENDS-ON` is in
-   `/issue-triage` Phase 4, and it outranks blast radius *and* the critical-severity
-   promotion below — a child promoted above its parent isn't a tradeoff, it's an unmergeable
-   order. If a critical-severity child would be promoted, promote the whole chain, parent
-   first, and say so.
-2. **Exclude a parent from its child's blast radius.** A stacked child shares files with its
-   parent by construction — that's why it was stacked. Counting that shared file penalizes
-   the chain for its own structure and sorts every stack to the back of the queue. Count only
-   the *other* open PRs it shares a file with.
+1. **A chain sorts as one block.** A child never ranks above its parent — this is a hard
+   constraint like `DEPENDS-ON` is in `/issue-triage` Phase 4, and the ascending blast-radius
+   sort has no way to know about it on its own, so the algorithm is explicit: a chain (the
+   parent plus every descendant) moves as one block, positioned at its root's blast-radius
+   rank, then unpacks internally in link order (parent first). The critical-severity promotion
+   is this same block-move, just triggered by the critical tier instead of a blast-radius rank
+   — one idea, not two competing rules: if any PR in the chain qualifies, the whole chain
+   promotes together, parent first.
+2. **No blast-radius correction is needed.** A stacked child's PR is opened against its
+   parent's branch (`gh pr create --base <parent branch>`), so `gh pr diff --name-only`
+   already returns only the child's own files — the parent's files never enter its overlap
+   set. There's nothing to subtract, and this holds after a restack too.
 3. **Mark children blocked.** A child cannot merge until its parent does, and needs
    `/work-issue restack` in between.
 
