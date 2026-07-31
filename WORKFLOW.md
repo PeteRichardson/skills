@@ -16,7 +16,7 @@ The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 | 1 | Find the work | `/project-review` and/or `/code-review <scope>` | Findings with `file:line`, severity, effort | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
 | 2 | File the work | `/make-issues [--all]` | GitHub issues, labelled + fingerprinted | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:`/`source:` labels |
 | 3 | Decide what to work | `/issue-triage` | Disposition per issue + ordered work units | `.claude/tmp/issue-triage/ISSUE_TRIAGE.md` |
-| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit | Branches `Fix-I<n>-…` (remote) / `PR<n>-Fix-I<n>-…` (local), open PRs, a resolution comment per issue |
+| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (remote) / `PR<n>-Fix-I<n>-…` (local), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/pr-triage` | Blast-radius-ranked merge sequence | `.claude/tmp/pr-triage/PR_TRIAGE.md` |
 | 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
 
@@ -171,6 +171,15 @@ a stale snapshot, since any merge or label change since invalidates one. It work
 sequentially (parallel worktrees on overlapping code is how you manufacture the conflicts
 stage 5 then has to untangle), and it halts on `NEEDS-DECISION`.
 
+**Overlapping units are stacked, not parallelised.** `/issue-triage`'s Phase 4.5 marks a unit
+`STACK` when it shares a file with one ranked ahead of it. That unit's branch is cut from its
+parent's branch and its PR targets that branch, so the change is written against code that
+already contains the parent's fix instead of against a base that predates it.
+
+This costs no wall-clock: batch mode was already sequential, so the parent's branch always
+existed by the time the child started — it was simply being ignored. Chains cap at 3; a 4th
+overlapping unit is `HOLD`, reported for the next batch.
+
 **Every issue also gets a resolution comment** once its PR is open — diagnosis, what the PR
 proposes for *that issue specifically*, what you'd notice if it merges, and what was left out.
 It's the answer to "what happened to my bug" without opening the diff, which matters most on a
@@ -225,10 +234,13 @@ Deliberately not automated. Work down the stage-5 sequence one PR at a time:
    merge on. The built-in `/review` is the alternative when you want a quick prose read and
    no artifact.
 2. Merge it on GitHub. `Fixes #<n>` in the body closes the issue(s) automatically.
-3. **Re-run `/pr-triage`** — repeat-run mode re-ranks what's left against the new base and
+3. **`/work-issue restack`** if anything was stacked on it. A child branch still carries its
+   parent's commits until this runs; merging one before restacking produces a PR whose diff
+   includes changes that already landed.
+4. **Re-run `/pr-triage`** — repeat-run mode re-ranks what's left against the new base and
    tells you what changed. The previous order is invalidated by every merge; don't work down
    a stale list.
-4. `git branch -d PR68-Fix-I60-F3-rust-ps-path` when the PR is merged. The PR number in the
+5. `git branch -d PR68-Fix-I60-F3-rust-ps-path` when the PR is merged. The PR number in the
    name is what makes this cheap; cleanup is manual on purpose.
 
 ---
@@ -289,6 +301,11 @@ the only trace it leaves, and no other stage reads it.
 **Small queue.** Under ~3 issues, stage 3 earns little — but run it anyway if any two touch
 the same file, since `GROUP` is what stops you from opening two PRs that conflict by
 construction. Under ~3 PRs, stage 5 earns little; blast radius on a queue of two is trivial.
+
+**A chain you no longer want stacked.** Restack the child onto the base branch directly
+(`/work-issue restack` does this once the parent merges) or, to break the chain early,
+`git rebase --onto origin/main <parent_head> <child>` by hand and retarget the PR. The chain
+is a convenience, not a commitment.
 
 ---
 

@@ -79,7 +79,7 @@ if [[ $HAS_GH -eq 1 ]]; then
   gh issue list --state open --limit 300 \
      --json number,labels,updatedAt > "$TMP/issues" 2>"$TMP/err" &
   gh pr list --state open --limit 100 \
-     --json number,title,mergeable > "$TMP/prs" 2>/dev/null &
+     --json number,title,mergeable,body > "$TMP/prs" 2>/dev/null &
   gh pr list --state merged --limit 30 \
      --json number,mergedAt > "$TMP/merged" 2>/dev/null &
   wait
@@ -176,6 +176,18 @@ if [[ -n $PT_FILE ]]; then
   fi
 fi
 
+# ------------------------------------------------- stacked PRs awaiting a restack
+# A child PR whose parent has merged needs `/work-issue restack` before it can be
+# merged itself -- otherwise its diff still carries the parent's commits.
+RESTACK_NEEDED=0
+if [[ $HAS_GH -eq 1 ]]; then
+  RESTACK_NEEDED=$(jq -r '
+    [ .[] | select(.body != null)
+          | select(.body | test("<!-- work-issue-stack"))
+          | select(.body | test("resolved:\\s*true") | not) ] | length
+  ' < "$TMP/prs" 2>/dev/null || echo 0)
+fi
+
 # ---------------------------------------------------------------- stage 6: merged
 
 MERGED=0
@@ -217,6 +229,10 @@ next_step() {
   fi
   if [[ $PRS_OPEN -ge 2 && ( -z $PT_FILE || $PT_STALE -eq 1 ) ]]; then
     echo "/pr-triage  —  $PRS_OPEN PRs open, ${PT_FILE:+merge order is stale}${PT_FILE:-no merge order yet}"
+    return
+  fi
+  if [[ ${RESTACK_NEEDED:-0} -gt 0 && $MERGED -gt 0 ]]; then
+    echo "/work-issue restack  —  $RESTACK_NEEDED stacked PR(s) open; any whose parent merged must be restacked before merging"
     return
   fi
   if [[ $PRS_OPEN -ge 1 && -n $PT_TOP ]]; then
