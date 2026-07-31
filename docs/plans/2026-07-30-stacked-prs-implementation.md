@@ -785,10 +785,17 @@ cd /Users/pete/projects/skills
 grep -q 'work-issue-stack' pr-triage/SKILL.md && echo PASS || echo FAIL
 grep -q 'work-issue restack' pr-triage/SKILL.md && echo PASS || echo FAIL
 grep -q 'never ranks above its parent' pr-triage/SKILL.md && echo PASS || echo FAIL
-grep -q 'Exclude a parent from its child' pr-triage/SKILL.md && echo PASS || echo FAIL
+grep -q 'matches another open PR' pr-triage/SKILL.md && echo PASS || echo FAIL
+grep -q 'one block' pr-triage/SKILL.md && echo PASS || echo FAIL
 ```
 
-Expected: `PASS` ×4.
+Expected: `PASS` ×5. (The fourth assertion checks Phase 1's queue-membership fix — a stacked
+child's `baseRefName` names its parent, not the base, so the filter must also admit any PR
+whose `baseRefName` matches another open PR's `headRefName`. The fifth checks Phase 3's
+block-move ordering rule. An earlier draft of this step asserted `'Exclude a parent from its
+child'`; that rule was corrected during review — a stacked child's PR diff never contains the
+parent's files in the first place, so there was nothing to exclude — and the string no longer
+appears in the shipped skill.)
 
 - [ ] **Step 7: Commit**
 
