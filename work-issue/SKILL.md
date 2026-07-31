@@ -270,8 +270,9 @@ something a batch run does on its own.
    | Open, `headRefOid` has moved | Restack onto the parent's branch (the marker's `parent_branch`) |
    | Closed unmerged | **Report and stop for this PR.** Its base is gone, and whether the child still makes sense is a judgment call, not a rebase |
 
-4. **Confirm before touching anything.** List each PR, its parent, and the target it will be
-   rebased onto. This force-pushes; a batch of them force-pushes repeatedly.
+4. **Confirm before touching anything, and wait for an explicit yes.** List each PR, its
+   parent, and the target it will be rebased onto, then stop and wait — printing the plan is
+   not the confirmation. This force-pushes; a batch of them force-pushes repeatedly.
 5. **Restack**, in a throwaway worktree so the main checkout is never involved:
 
    ```bash
@@ -400,8 +401,8 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
   captured in Phase 3, re-derive it with `git rev-parse origin/<parent branch>` before the
   branch has any commits of its own — never after.
 * Never stack onto a parent whose PR failed to open. No parent PR, no child.
-* Never restack without confirming first. It force-pushes, and on a batch it force-pushes
-  several branches in a row.
+* Never restack without confirming first and waiting for an explicit yes. It force-pushes,
+  and on a batch it force-pushes several branches in a row.
 * Never resolve a restack conflict automatically. Keep the worktree, report the path, move on.
 * Never push a restack whose verification step still shows the parent's commits.
 * Never restack a child whose parent PR was closed unmerged. Report it; the call is the
