@@ -1,6 +1,6 @@
 ---
 name: issue-triage
-description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue, and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, `/issue-triage clean` [--all], and `/issue-triage label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 2-5 are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. A triage run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
+description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue (including stacked and held units), and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, `/issue-triage clean` [--all], and `/issue-triage label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 2-5, including Phase 4.5, are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. A triage run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
 disable-model-invocation: true
 ---
 
@@ -53,7 +53,7 @@ Check the invocation before doing anything else:
 * **`/issue-triage label`**, or **`/issue-triage label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run a triage.
 * **`/issue-triage`** (no args) — full-queue run, proceed to Phase 1.
 * **`/issue-triage #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
-* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5 directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
+* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5, including Phase 4.5, directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
 
 ## Phase 1: Enumerate the eligible set
 
@@ -100,6 +100,45 @@ Rank only `WORK` and `GROUP` units. `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` 
 3. **Effort tiebreaker.** `effort: S` before `M` before `L`, so the queue shrinks fastest. Never let effort override severity or dependency.
 
 When severity and dependency conflict — a High-severity issue that must wait on a Medium one — state it in prose in the deliverable rather than hiding it in the ordering.
+
+## Phase 4.5: Form stacks
+
+Phase 4 produced an order. This phase reads it and decides which units branch from the base
+and which branch from the unit before them.
+
+Walk the ordered list from position 1, considering only units Phase 3 dispositioned `WORK`.
+`GROUP` units are skipped — a `GROUP` can be a parent, but is never itself converted. For
+each `WORK` unit, look for an `OVERLAPS` edge (from Phase 2) to any unit ranked **earlier**
+in this same order:
+
+* **No earlier overlap** → stays `WORK`. Branches from the base, as today.
+* **An earlier overlap** → becomes `STACK`, parented to the **nearest** such unit. It gets
+  branched from that unit's branch and its PR is based on it.
+* **Would be the 4th link in a chain** → becomes `HOLD` instead. Not worked this batch.
+
+Chains form transitively: if #15 stacks on #11 and #18 overlaps #15, then #18 stacks on #15,
+giving a depth-3 chain #11 → #15 → #18. A 4th overlapping unit is `HOLD`.
+
+`STACK` is deliberately **not** in Phase 3's precedence table, and that table is unchanged.
+Phase 3 can't assign it: whether a unit stacks depends on which units rank ahead of it, which
+isn't known until Phase 4 has run. This phase only ever converts a `WORK` unit into `STACK`
+or `HOLD` — it never touches `GROUP`, `NEEDS-DECISION`, `DEFER`, or `CLOSE-MOOT`.
+
+A `GROUP` unit can *be* a parent — its branch is a branch like any other — but is never
+itself converted.
+
+| Disposition | Assigned when | Effect |
+|---|---|---|
+| `STACK` | `OVERLAPS` (without `COLLIDES`) an earlier-ranked unit, within the depth cap | Branched from that unit's branch; PR based on it; merges after it. |
+| `HOLD` | Would be the 4th link in a chain | Skipped this batch, reported for the next. `order: ~`. |
+
+**Why `COLLIDES` is excluded:** those are already `GROUP`ed into one PR by Phase 3, which is
+strictly better — two stacked PRs that rewrite the same function hand the reviewer two half
+answers. Stacking is for the `OVERLAPS` band only, which Phase 2 deliberately leaves
+ungrouped (see "Why file overlap alone doesn't justify grouping").
+
+**Why depth 3:** a PR rejected at the bottom of a chain forces a restack of everything above
+it. That cost grows with depth; the benefit doesn't.
 
 ## Phase 5: Deliverable
 
@@ -148,6 +187,33 @@ units:
     issues:
       - number: 14
         finding: ~
+  - order: 3
+    disposition: STACK
+    critical: false
+    stack:
+      parent_order: 2
+      parent_issue: 14
+      depth: 2
+    issues:
+      - number: 15
+        finding: F9
+  - order: 4
+    disposition: STACK
+    critical: false
+    stack:
+      parent_order: 3
+      parent_issue: 15
+      depth: 3
+    issues:
+      - number: 20
+        finding: ~
+  - order: ~
+    disposition: HOLD
+    critical: false
+    held_for: "#14 -> #15 -> #20 chain"
+    issues:
+      - number: 21
+        finding: ~
   - order: ~
     disposition: NEEDS-DECISION
     critical: false
@@ -173,6 +239,11 @@ Then the body:
 
   Identifier formatting, since conflating the three spaces is the failure mode this table prevents: issue numbers keep `#`; finding IDs stay bare (`F3`, or a bare ordinal from `/code-review`); use `—` for absent, never a blank cell, never a guess.
 * **Grouping detail** — for each `GROUP` unit, what specifically collides (file, function, why separate PRs would conflict) and the suggested combined branch slug.
+* **Stack detail** — for each chain, the order of its links, which file overlap put each
+  child on its parent, and the explicit note that a child cannot merge before its parent.
+* **Held units** — every `HOLD` unit, which chain it overlaps, and that it is a candidate for
+  the next batch rather than a deferral. `HOLD` is a scheduling consequence of the depth cap,
+  not a judgment about the issue — keep it out of the `DEFER` section, which is a judgment.
 * **Decisions needed** — for each `NEEDS-DECISION`, the question stated plainly and the options the issue itself names. This section is the one the user acts on first; make it answerable without opening the issue.
 * **Proposed deferrals** — each `DEFER` with its reason, phrased as a recommendation. State explicitly that no label has been applied.
 * **Proposed closures** — each `CLOSE-MOOT`, naming the superseding issue and the evidence. State explicitly that nothing has been closed.
@@ -315,7 +386,7 @@ The intended loop:
 1. `/project-review` or `/code-review` — find the work
 2. `/make-issues` (or `backfill`) — file it, with labels and fingerprints
 3. `/issue-triage` — decide what to work, in what order, what to combine, what to drop
-4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5 as a sub-protocol to order its queue)
+4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5, including Phase 4.5, as a sub-protocol to order its queue)
 5. `/pr-triage` — order the resulting PR queue
 6. Merge manually in the recommended order
 

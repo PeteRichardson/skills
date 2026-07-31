@@ -32,7 +32,7 @@ Copied verbatim from `docs/specs/2026-07-30-stacked-prs-design.md`. Every task's
 | `issue-triage/SKILL.md` | **Modify.** New Phase 4.5, `STACK`/`HOLD` dispositions, `stack:` snapshot block | 2 |
 | `work-issue/SKILL.md` | **Modify.** Phase 3 branches from parent, Phase 5 targets parent + writes marker, batch plan shows chains | 3 |
 | `work-issue/SKILL.md` | **Modify.** `restack` subcommand in Phase 0 + its own protocol section | 4 |
-| `pr-triage/SKILL.md` | **Modify.** Topological constraint in Phase 3, blast-radius correction, chain display in Phase 5 | 5 |
+| `pr-triage/SKILL.md` | **Modify.** Queue membership in Phase 1, topological constraint (block-move) in Phase 3, chain display in Phase 5 | 5 |
 | `pipeline/pipeline-status`, `WORKFLOW.md`, `pipeline/SKILL.md` | **Modify.** Detect restack-needed state; document the model and the stage-6 loop | 6 |
 
 Tasks 3 and 4 both modify `work-issue/SKILL.md` but are split because a reviewer could reasonably accept the stacking behavior while rejecting the force-pushing subcommand. Task 3 leaves the skill in a coherent state on its own: stacks get created, and the manual `git rebase --onto` recipe is documented for undoing them.
@@ -246,8 +246,10 @@ Immediately before `## Phase 5: Deliverable` in `issue-triage/SKILL.md`, insert:
 Phase 4 produced an order. This phase reads it and decides which units branch from the base
 and which branch from the unit before them.
 
-Walk the ordered list from position 1. For each unit, look for an `OVERLAPS` edge (from
-Phase 2) to any unit ranked **earlier** in this same order:
+Walk the ordered list from position 1, considering only units Phase 3 dispositioned `WORK`.
+`GROUP` units are skipped — a `GROUP` can be a parent, but is never itself converted. For
+each `WORK` unit, look for an `OVERLAPS` edge (from Phase 2) to any unit ranked **earlier**
+in this same order:
 
 * **No earlier overlap** → stays `WORK`. Branches from the base, as today.
 * **An earlier overlap** → becomes `STACK`, parented to the **nearest** such unit. It gets
@@ -295,10 +297,20 @@ unit (`order: 2`, issue 14). Insert before the `NEEDS-DECISION` entry:
     issues:
       - number: 15
         finding: F9
+  - order: 4
+    disposition: STACK
+    critical: false
+    stack:
+      parent_order: 3
+      parent_issue: 15
+      depth: 3
+    issues:
+      - number: 20
+        finding: ~
   - order: ~
     disposition: HOLD
     critical: false
-    held_for: "#14 -> #15 chain"
+    held_for: "#14 -> #15 -> #20 chain"
     issues:
       - number: 21
         finding: ~
@@ -564,10 +576,13 @@ only part of this skill that force-pushes, which is why it's an explicit command
 something a batch run does on its own.
 
 1. **Find the candidates.** `gh pr list --state open --json number,body,headRefName,baseRefName`
-   and keep those whose body contains a `<!-- work-issue-stack` marker. Scoped invocation
-   filters this list; a named PR with no marker is reported as such, not guessed at.
+   and keep those whose body contains a `<!-- work-issue-stack` marker. Skip any marker that
+   carries `resolved: true` — that PR's stack was already unwound and there is nothing left to
+   restack. Scoped invocation filters this list; a named PR with no marker is reported as such,
+   not guessed at.
 2. **Read the marker** for `parent_pr`, `parent_branch`, `parent_head`. A marker missing any
-   of the three is corrupt — report it and skip that PR. Never reconstruct a `parent_head`
+   of the three is corrupt — report it and skip that PR. `resolved: true` is an optional fourth
+   key; its absence is normal and never counts as corruption. Never reconstruct a `parent_head`
    from the branch's current position; that's the one value that can't be re-derived once the
    parent has moved.
 3. **Classify the parent** with `gh pr view <parent_pr> --json state,headRefOid,baseRefName`:
@@ -576,11 +591,12 @@ something a batch run does on its own.
    |---|---|
    | Merged | Restack onto the parent's own base branch |
    | Open, `headRefOid` still equals `parent_head` | Nothing to do — report "up to date" and skip |
-   | Open, `headRefOid` has moved | Restack onto the parent's new head |
+   | Open, `headRefOid` has moved | Restack onto the parent's branch (the marker's `parent_branch`) |
    | Closed unmerged | **Report and stop for this PR.** Its base is gone, and whether the child still makes sense is a judgment call, not a rebase |
 
-4. **Confirm before touching anything.** List each PR, its parent, and the target it will be
-   rebased onto. This force-pushes; a batch of them force-pushes repeatedly.
+4. **Confirm before touching anything, and wait for an explicit yes.** List each PR, its
+   parent, and the target it will be rebased onto, then stop and wait — printing the plan is
+   not the confirmation. This force-pushes; a batch of them force-pushes repeatedly.
 5. **Restack**, in a throwaway worktree so the main checkout is never involved:
 
    ```bash
@@ -603,8 +619,20 @@ something a batch run does on its own.
    refuse to clobber a commit someone pushed to the child branch since.
 9. **Refresh the marker** with `gh pr edit <pr> --body <updated>`: set `parent_head` to the
    sha just rebased onto, and — if the parent merged — set `parent_branch` to the base branch
-   and drop `parent_pr`, since there is no longer a parent PR to wait for. A marker written
-   once and never updated silently degrades the *next* restack into a plain rebase.
+   and add a fourth line, `resolved: true`, since there is no longer a parent PR to wait for.
+   **`parent_pr` is never removed** — step 2's corruption check requires all three original
+   keys, and a marker missing one would be misreported as corrupt on every later scan. A
+   marker written once and never updated silently degrades the *next* restack into a plain
+   rebase.
+
+   ```html
+   <!-- work-issue-stack
+   parent_pr: 68
+   parent_branch: main
+   parent_head: 9f8e7d6c1b2a3d4e5f60718293a4b5c6d7e8f901
+   resolved: true
+   -->
+   ```
 10. **Retarget the PR** if GitHub hasn't: `gh pr edit <pr> --base <target>`. GitHub
     auto-retargets a child when its parent merges, so this is usually a no-op — do it anyway
     rather than relying on it, and report when it was actually needed.
@@ -620,8 +648,8 @@ closed), and the new base. A conflicted entry names its kept worktree path.
 Append to Rules:
 
 ```markdown
-* Never restack without confirming first. It force-pushes, and on a batch it force-pushes
-  several branches in a row.
+* Never restack without confirming first and waiting for an explicit yes. It force-pushes,
+  and on a batch it force-pushes several branches in a row.
 * Never resolve a restack conflict automatically. Keep the worktree, report the path, move on.
 * Never push a restack whose verification step still shows the parent's commits.
 * Never restack a child whose parent PR was closed unmerged. Report it; the call is the
@@ -670,7 +698,7 @@ git commit -m "feat(work-issue): add restack subcommand for stacked PRs"
 ### Task 5: `/pr-triage` — stacks constrain the merge order
 
 **Files:**
-- Modify: `pr-triage/SKILL.md` — Phase 3 (line 71, the blast-radius computation and its tiebreakers), Phase 5 deliverable (line 111, the frontmatter schema and the merge table), and the "Next in the pipeline" variants (~line 191)
+- Modify: `pr-triage/SKILL.md` — Phase 1 (the same-base filter that would otherwise drop every stacked child), Phase 3 (line 71, the blast-radius computation and its tiebreakers), Phase 5 deliverable (line 111, the frontmatter schema and the merge table), and the "Next in the pipeline" variants (~line 191)
 
 **Interfaces:**
 - Consumes: the `work-issue-stack` marker (`parent_pr`) from Task 3, and `/work-issue restack` from Task 4.
@@ -686,24 +714,42 @@ grep -q 'restack' pr-triage/SKILL.md && echo PASS || echo FAIL
 
 Expected: `FAIL` twice.
 
-- [ ] **Step 2: Add stack detection and the ordering constraint to Phase 3**
+- [ ] **Step 2: Fix Phase 1's queue filter, then add stack detection and the ordering
+      constraint to Phase 3**
 
-Insert into Phase 3, before the "Tiebreakers" list:
+  Phase 1's existing same-base filter drops every stacked child before Phase 3 ever runs — a
+  child's `baseRefName` is its parent's branch, not the repo base. Amend it to also admit any
+  PR whose `baseRefName` matches another open PR's `headRefName`.
+
+  Insert into Phase 3, before the "Tiebreakers" list:
 
 ```markdown
 ### Stack constraint (hard, checked before ranking)
 
-Read each PR's body for a `<!-- work-issue-stack` marker and record its `parent_pr`. Then:
+Read each PR's body for a `<!-- work-issue-stack` marker and record its `parent_pr`. Skip a
+marker carrying `resolved: true` entirely — that PR's stack was already unwound by
+`/work-issue restack` after its parent merged, so for every purpose below it's an ordinary
+unstacked PR: no parent constraint, no blast-radius correction. Then, for every remaining
+(unresolved) marker:
 
-1. **A child never ranks above its parent.** This is a hard constraint like `DEPENDS-ON` is in
-   `/issue-triage` Phase 4, and it outranks blast radius *and* the critical-severity
-   promotion below — a child promoted above its parent isn't a tradeoff, it's an unmergeable
-   order. If a critical-severity child would be promoted, promote the whole chain, parent
+1. **A chain sorts as one block.** A child never ranks above its parent — this is a hard
+   constraint like `DEPENDS-ON` is in `/issue-triage` Phase 4, and the ascending blast-radius
+   sort has no way to know about it on its own, so it needs an explicit rule to satisfy it: a
+   chain (the parent plus every descendant stacked on it, directly or transitively) moves as
+   one block, positioned at its root's — the parent's — blast-radius rank, then unpacks
+   internally in link order (parent first, then each child in stack order). Ties against
+   unrelated PRs at that same rank break by the existing tiebreakers, applied to the chain
+   root. The critical-severity promotion below is this same block-move, just triggered by the
+   critical tier instead of a blast-radius rank — one idea, not two competing rules: if any PR
+   in the chain qualifies for the critical tier, the whole chain promotes together, parent
    first, and say so.
-2. **Exclude a parent from its child's blast radius.** A stacked child shares files with its
-   parent by construction — that's why it was stacked. Counting that shared file penalizes
-   the chain for its own structure and sorts every stack to the back of the queue. Count only
-   the *other* open PRs it shares a file with.
+2. **No blast-radius correction is needed for a stacked child.** `/work-issue` opens a child's
+   PR with `gh pr create --base <parent branch>`, so Phase 2's `gh pr diff <N> --name-only`
+   diffs the child against its *parent's* branch, not the base — it returns only the child's
+   own files, and the parent's files never enter the child's overlap set in the first place.
+   There's nothing to subtract; don't invent a correction where none is needed. This holds
+   after a restack too: once `/work-issue restack` lands, the child's branch carries only its
+   own commits, so its file set is identical whether measured against the parent or the base.
 3. **Mark children blocked.** A child cannot merge until its parent does, and needs
    `/work-issue restack` in between.
 
@@ -760,10 +806,17 @@ cd /Users/pete/projects/skills
 grep -q 'work-issue-stack' pr-triage/SKILL.md && echo PASS || echo FAIL
 grep -q 'work-issue restack' pr-triage/SKILL.md && echo PASS || echo FAIL
 grep -q 'never ranks above its parent' pr-triage/SKILL.md && echo PASS || echo FAIL
-grep -q 'Exclude a parent from its child' pr-triage/SKILL.md && echo PASS || echo FAIL
+grep -q 'matches another open PR' pr-triage/SKILL.md && echo PASS || echo FAIL
+grep -q 'one block' pr-triage/SKILL.md && echo PASS || echo FAIL
 ```
 
-Expected: `PASS` ×4.
+Expected: `PASS` ×5. (The fourth assertion checks Phase 1's queue-membership fix — a stacked
+child's `baseRefName` names its parent, not the base, so the filter must also admit any PR
+whose `baseRefName` matches another open PR's `headRefName`. The fifth checks Phase 3's
+block-move ordering rule. An earlier draft of this step asserted `'Exclude a parent from its
+child'`; that rule was corrected during review — a stacked child's PR diff never contains the
+parent's files in the first place, so there was nothing to exclude — and the string no longer
+appears in the shipped skill.)
 
 - [ ] **Step 7: Commit**
 
@@ -798,26 +851,34 @@ Expected: `FAIL`, `FAIL`, `SYNTAX OK`.
 
 - [ ] **Step 2: Detect restack-needed PRs in `pipeline-status`**
 
-The script already fetches open PRs into `$TMP/prs` and merged ones into `$TMP/merged`. After
-the stage-5 block, add:
+The script already fetches open PRs (with `body`) into `$TMP/prs` and merged ones into
+`$TMP/merged`. After the stage-5 block, add:
 
 ```bash
 # ------------------------------------------------- stacked PRs awaiting a restack
 # A child PR whose parent has merged needs `/work-issue restack` before it can be
-# merged itself -- otherwise its diff still carries the parent's commits.
+# merged itself -- otherwise its diff still carries the parent's commits. Counted
+# precisely: an unresolved marker whose own parent_pr shows up in $TMP/merged.
+# $TMP/prs (with body) and $TMP/merged are already on disk from the parallel gh
+# calls above, so this costs no extra `gh` call.
 RESTACK_NEEDED=0
 if [[ $HAS_GH -eq 1 ]]; then
-  RESTACK_NEEDED=$(jq -r '
-    [ .[] | select(.body != null)
-          | select(.body | test("<!-- work-issue-stack")) ] | length
+  merged_json=$(cat "$TMP/merged" 2>/dev/null)
+  [[ -z $merged_json ]] && merged_json='[]'
+  RESTACK_NEEDED=$(jq -r --argjson merged "$merged_json" '
+    ($merged | map(.number)) as $merged_nums
+    | [ .[] | select(.body != null)
+            | select(.body | test("<!-- work-issue-stack"))
+            | select(.body | test("resolved:\\s*true") | not)
+            | (.body | capture("parent_pr:\\s*(?<n>[0-9]+)").n | tonumber) as $p
+            | select($merged_nums | index($p)) ] | length
   ' < "$TMP/prs" 2>/dev/null || echo 0)
 fi
 ```
 
-Note: this counts stacked PRs, not specifically those needing a restack — deciding that needs
-the parent's state, which is one `gh` call per stacked PR and too slow for a "zero tokens,
-instant" dashboard. Counting stacked PRs and letting the recommendation mention the restack is
-the right trade for this script; `/pipeline` (Step 5) does the precise version.
+The count is precise — it's the exact population that needs a restack, not a proxy for it —
+because both halves it needs (`$TMP/prs` with `body`, and `$TMP/merged`) are already on disk
+from the parallel `gh` calls above; no extra `gh` call is spent to get there.
 
 Make sure `body` is in the `gh pr list --json` field list where `$TMP/prs` is populated — add
 it if absent.
@@ -828,8 +889,8 @@ Insert immediately **before** the existing `PRS_OPEN -ge 1 && -n $PT_TOP` branch
 restack outranks a merge:
 
 ```bash
-  if [[ ${RESTACK_NEEDED:-0} -gt 0 && $MERGED -gt 0 ]]; then
-    echo "/work-issue restack  —  $RESTACK_NEEDED stacked PR(s) open; any whose parent merged must be restacked before merging"
+  if [[ ${RESTACK_NEEDED:-0} -gt 0 ]]; then
+    echo "/work-issue restack  —  $RESTACK_NEEDED stacked PR(s) whose parent has merged need restacking before they can merge"
     return
   fi
 ```
@@ -853,10 +914,10 @@ In `pipeline/SKILL.md`'s override cases list, add:
 
 ```markdown
 * **The script recommends merging but the top PR is a stacked child** — read its
-  `work-issue-stack` marker and check the parent's state. If the parent has merged,
-  `/work-issue restack` comes first. The script only counts stacked PRs; it can't afford the
-  per-PR `gh` call to tell which ones are actually stale, so this is the check it delegates
-  to you.
+  `work-issue-stack` marker and check the parent's state. The script already recommends
+  `/work-issue restack` ahead of any merge for a PR whose parent has merged, computed from
+  the same `gh pr list` output rather than a per-PR call; this override only fires if you
+  believe its count is stale (a parent merged in the seconds between the two runs).
 ```
 
 - [ ] **Step 6: Document the model in `WORKFLOW.md`**

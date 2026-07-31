@@ -93,8 +93,9 @@ Phase 4.5, by converting units Phase 3 already dispositioned `WORK`.
 **The parent is determined by order, not by disposition**, so this needs a new phase rather
 than a change to Phase 3:
 
-> **Phase 4.5: Form stacks.** After Phase 4 has ranked the units, walk the ordered list. For
-> each unit with an `OVERLAPS` edge to any earlier unit, mark it `STACK` on the *nearest*
+> **Phase 4.5: Form stacks.** After Phase 4 has ranked the units, walk the ordered list,
+> considering only units Phase 3 dispositioned `WORK` (`GROUP` units are skipped). For each
+> such unit with an `OVERLAPS` edge to any earlier unit, mark it `STACK` on the *nearest*
 > such unit. A unit with no earlier overlap stays `WORK`. Chains form transitively: if #15
 > stacks on #11 and #18 overlaps #15, #18 stacks on #15 — that's a depth-3 chain.
 
@@ -193,7 +194,7 @@ Per child PR carrying a `work-issue-stack` marker:
    |---|---|
    | Merged | Restack onto the base branch |
    | Open, head still `parent_head` | Nothing to do — report and skip |
-   | Open, head moved (force-push or new commits) | Restack onto the parent's new head |
+   | Open, head moved (force-push or new commits) | Restack onto the parent's branch (the marker's `parent_branch`) |
    | Closed unmerged | **Report and stop.** The child's base is gone; whether its change still makes sense is a judgment call, not a rebase |
 
 3. `git fetch origin`, then
@@ -204,21 +205,36 @@ Per child PR carrying a `work-issue-stack` marker:
    child's own commits. If the parent's commits are still present, something is wrong —
    report rather than push.
 6. `git push --force-with-lease` — never bare `--force`. Confirm before pushing.
-7. **Update the marker** with the new `parent_head` (and `parent_branch` → the base branch
-   once the parent merged), so a second restack is as deterministic as the first. A marker
-   written once and never refreshed goes stale on the first parent force-push.
+7. **Update the marker** with the new `parent_head` (and `parent_branch` → the base branch,
+   plus a fourth line `resolved: true`, once the parent merged), so a second restack is as
+   deterministic as the first. **`parent_pr` is never removed** — the corruption check requires
+   all three original keys, and a marker missing one reads as corrupt on every later scan even
+   though the restack that produced it succeeded. A marker written once and never refreshed
+   goes stale on the first parent force-push.
 8. Retarget the PR base if GitHub hasn't (`gh pr edit <n> --base <target>`). GitHub
    auto-retargets children when a parent merges; step 8 is the fallback for the cases it
    doesn't, and is a no-op when it already did.
 
 ### `/pr-triage` — stacks are a hard ordering constraint
 
-1. **Topological constraint.** A child never ranks above its parent. This joins the existing
-   critical-severity promotion as a rule that outranks blast radius — with the difference
-   that a stack violation isn't a preference, it's unmergeable.
-2. **Blast radius correction.** A child shares files with its parent *by construction*.
-   Exclude the parent from the child's blast-radius count, or every stack ranks itself to the
-   bottom of the queue for being a stack.
+0. **Queue membership.** A stacked child's `baseRefName` is its parent's branch, not the repo
+   base — Phase 1's existing same-base filter drops it before any of the rules below can see
+   it. The filter must also admit any PR whose `baseRefName` matches another open PR's
+   `headRefName`.
+1. **Topological constraint, satisfied as a block move.** A child never ranks above its
+   parent — this joins the existing critical-severity promotion as a rule that outranks blast
+   radius, with the difference that a stack violation isn't a preference, it's unmergeable.
+   The ascending blast-radius sort has no way to know about it on its own, so the algorithm is
+   explicit: a chain (parent plus every descendant, direct or transitive) sorts as one block,
+   positioned at its root's blast-radius rank, then unpacks internally in link order (parent
+   first). Ties against unrelated PRs at that same rank break by the existing tiebreakers,
+   applied to the chain root. The critical-severity promotion is the same block-move triggered
+   by the critical tier instead of a blast-radius rank — one rule, not two.
+2. **No blast-radius correction needed.** A stacked child's PR is opened against its parent's
+   branch (`gh pr create --base <parent branch>`), so `gh pr diff --name-only` already returns
+   only the child's own files — the parent's files never enter its overlap set. There's
+   nothing to subtract, and this holds after a restack too, since the restacked branch still
+   carries only the child's own commits.
 3. **Display.** Show chains as a unit, with children marked blocked until the parent merges,
    and the merge sequence naming the restack between links:
 

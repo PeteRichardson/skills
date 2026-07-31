@@ -107,6 +107,11 @@ Override the script's cascade in exactly these cases, and say why when you do:
   comes first. A PR counts as reviewed if `docs/reviews/code-review_PR<n>_*.md` exists and
   postdates the PR's last push; the script checks only for the file's existence, so a report
   older than the newest commit on that PR is one you should call out.
+* **The script recommends merging but the top PR is a stacked child** — read its
+  `work-issue-stack` marker and check the parent's state. The script already recommends
+  `/work-issue restack` ahead of any merge for a PR whose parent has merged, computed from
+  the same `gh pr list` output rather than a per-PR call; this override only fires if you
+  believe its count is stale (a parent merged in the seconds between the two runs).
 
 Where the recommendation depends on a judgment the user might disagree with, say what the
 alternative is in a clause, not a paragraph. One recommendation, not a menu.
