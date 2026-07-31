@@ -225,10 +225,11 @@ Per child PR carrying a `work-issue-stack` marker:
    parent — this joins the existing critical-severity promotion as a rule that outranks blast
    radius, with the difference that a stack violation isn't a preference, it's unmergeable.
    The ascending blast-radius sort has no way to know about it on its own, so the algorithm is
-   explicit: a chain (parent plus every descendant) sorts as one block, positioned at its
-   root's blast-radius rank, then unpacks internally in link order (parent first). The
-   critical-severity promotion is the same block-move triggered by the critical tier instead
-   of a blast-radius rank — one rule, not two.
+   explicit: a chain (parent plus every descendant, direct or transitive) sorts as one block,
+   positioned at its root's blast-radius rank, then unpacks internally in link order (parent
+   first). Ties against unrelated PRs at that same rank break by the existing tiebreakers,
+   applied to the chain root. The critical-severity promotion is the same block-move triggered
+   by the critical tier instead of a blast-radius rank — one rule, not two.
 2. **No blast-radius correction needed.** A stacked child's PR is opened against its parent's
    branch (`gh pr create --base <parent branch>`), so `gh pr diff --name-only` already returns
    only the child's own files — the parent's files never enter its overlap set. There's

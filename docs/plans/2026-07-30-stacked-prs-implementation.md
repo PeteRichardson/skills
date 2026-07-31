@@ -715,20 +715,30 @@ Expected: `FAIL` twice.
 ```markdown
 ### Stack constraint (hard, checked before ranking)
 
-Read each PR's body for a `<!-- work-issue-stack` marker and record its `parent_pr`. Then:
+Read each PR's body for a `<!-- work-issue-stack` marker and record its `parent_pr`. Skip a
+marker carrying `resolved: true` entirely — that PR's stack was already unwound by
+`/work-issue restack` after its parent merged, so for every purpose below it's an ordinary
+unstacked PR: no parent constraint, no blast-radius correction. Then, for every remaining
+(unresolved) marker:
 
 1. **A chain sorts as one block.** A child never ranks above its parent — this is a hard
    constraint like `DEPENDS-ON` is in `/issue-triage` Phase 4, and the ascending blast-radius
-   sort has no way to know about it on its own, so the algorithm is explicit: a chain (the
-   parent plus every descendant) moves as one block, positioned at its root's blast-radius
-   rank, then unpacks internally in link order (parent first). The critical-severity promotion
-   is this same block-move, just triggered by the critical tier instead of a blast-radius rank
-   — one idea, not two competing rules: if any PR in the chain qualifies, the whole chain
-   promotes together, parent first.
-2. **No blast-radius correction is needed.** A stacked child's PR is opened against its
-   parent's branch (`gh pr create --base <parent branch>`), so `gh pr diff --name-only`
-   already returns only the child's own files — the parent's files never enter its overlap
-   set. There's nothing to subtract, and this holds after a restack too.
+   sort has no way to know about it on its own, so it needs an explicit rule to satisfy it: a
+   chain (the parent plus every descendant stacked on it, directly or transitively) moves as
+   one block, positioned at its root's — the parent's — blast-radius rank, then unpacks
+   internally in link order (parent first, then each child in stack order). Ties against
+   unrelated PRs at that same rank break by the existing tiebreakers, applied to the chain
+   root. The critical-severity promotion below is this same block-move, just triggered by the
+   critical tier instead of a blast-radius rank — one idea, not two competing rules: if any PR
+   in the chain qualifies for the critical tier, the whole chain promotes together, parent
+   first, and say so.
+2. **No blast-radius correction is needed for a stacked child.** `/work-issue` opens a child's
+   PR with `gh pr create --base <parent branch>`, so Phase 2's `gh pr diff <N> --name-only`
+   diffs the child against its *parent's* branch, not the base — it returns only the child's
+   own files, and the parent's files never enter the child's overlap set in the first place.
+   There's nothing to subtract; don't invent a correction where none is needed. This holds
+   after a restack too: once `/work-issue restack` lands, the child's branch carries only its
+   own commits, so its file set is identical whether measured against the parent or the base.
 3. **Mark children blocked.** A child cannot merge until its parent does, and needs
    `/work-issue restack` in between.
 
