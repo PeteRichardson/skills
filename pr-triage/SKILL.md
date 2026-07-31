@@ -54,7 +54,7 @@ Check the invocation before doing anything else:
 ## Phase 1: Enumerate the queue
 
 1. Confirm the repo and base branch (default `main`, ask if ambiguous).
-2. `gh pr list --state open --json number,title,author,headRefName,baseRefName,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,mergeStateStatus`
+2. `gh pr list --state open --json number,title,author,headRefName,baseRefName,createdAt,updatedAt,additions,deletions,changedFiles,mergeable,mergeStateStatus,body`
 3. Filter to PRs targeting the same base branch, plus any PR whose `baseRefName` matches another open PR's `headRefName` — a stacked child targets its parent's branch by design, not the base, and the same-base filter alone would drop it before Phase 3 ever sees it, hiding the exact PR the merge order most needs to sequence. Note their base commit — if they're not all based on the same commit, record how far each has diverged (`git log --oneline <base>..<pr-branch>` vs `git log --oneline <pr-branch>..<base>`).
 4. Use `TodoWrite` to publish a plan (enumerate → overlap → rank → judge → deliver) so progress is visible on a large queue.
 
