@@ -197,10 +197,20 @@ units:
     issues:
       - number: 15
         finding: F9
+  - order: 4
+    disposition: STACK
+    critical: false
+    stack:
+      parent_order: 3
+      parent_issue: 15
+      depth: 3
+    issues:
+      - number: 20
+        finding: ~
   - order: ~
     disposition: HOLD
     critical: false
-    held_for: "#14 -> #15 chain"
+    held_for: "#14 -> #15 -> #20 chain"
     issues:
       - number: 21
         finding: ~

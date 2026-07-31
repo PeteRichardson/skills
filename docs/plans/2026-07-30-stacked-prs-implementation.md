@@ -297,10 +297,20 @@ unit (`order: 2`, issue 14). Insert before the `NEEDS-DECISION` entry:
     issues:
       - number: 15
         finding: F9
+  - order: 4
+    disposition: STACK
+    critical: false
+    stack:
+      parent_order: 3
+      parent_issue: 15
+      depth: 3
+    issues:
+      - number: 20
+        finding: ~
   - order: ~
     disposition: HOLD
     critical: false
-    held_for: "#14 -> #15 chain"
+    held_for: "#14 -> #15 -> #20 chain"
     issues:
       - number: 21
         finding: ~
@@ -584,8 +594,9 @@ something a batch run does on its own.
    | Open, `headRefOid` has moved | Restack onto the parent's branch (the marker's `parent_branch`) |
    | Closed unmerged | **Report and stop for this PR.** Its base is gone, and whether the child still makes sense is a judgment call, not a rebase |
 
-4. **Confirm before touching anything.** List each PR, its parent, and the target it will be
-   rebased onto. This force-pushes; a batch of them force-pushes repeatedly.
+4. **Confirm before touching anything, and wait for an explicit yes.** List each PR, its
+   parent, and the target it will be rebased onto, then stop and wait — printing the plan is
+   not the confirmation. This force-pushes; a batch of them force-pushes repeatedly.
 5. **Restack**, in a throwaway worktree so the main checkout is never involved:
 
    ```bash
@@ -637,8 +648,8 @@ closed), and the new base. A conflicted entry names its kept worktree path.
 Append to Rules:
 
 ```markdown
-* Never restack without confirming first. It force-pushes, and on a batch it force-pushes
-  several branches in a row.
+* Never restack without confirming first and waiting for an explicit yes. It force-pushes,
+  and on a batch it force-pushes several branches in a row.
 * Never resolve a restack conflict automatically. Keep the worktree, report the path, move on.
 * Never push a restack whose verification step still shows the parent's commits.
 * Never restack a child whose parent PR was closed unmerged. Report it; the call is the
@@ -840,26 +851,34 @@ Expected: `FAIL`, `FAIL`, `SYNTAX OK`.
 
 - [ ] **Step 2: Detect restack-needed PRs in `pipeline-status`**
 
-The script already fetches open PRs into `$TMP/prs` and merged ones into `$TMP/merged`. After
-the stage-5 block, add:
+The script already fetches open PRs (with `body`) into `$TMP/prs` and merged ones into
+`$TMP/merged`. After the stage-5 block, add:
 
 ```bash
 # ------------------------------------------------- stacked PRs awaiting a restack
 # A child PR whose parent has merged needs `/work-issue restack` before it can be
-# merged itself -- otherwise its diff still carries the parent's commits.
+# merged itself -- otherwise its diff still carries the parent's commits. Counted
+# precisely: an unresolved marker whose own parent_pr shows up in $TMP/merged.
+# $TMP/prs (with body) and $TMP/merged are already on disk from the parallel gh
+# calls above, so this costs no extra `gh` call.
 RESTACK_NEEDED=0
 if [[ $HAS_GH -eq 1 ]]; then
-  RESTACK_NEEDED=$(jq -r '
-    [ .[] | select(.body != null)
-          | select(.body | test("<!-- work-issue-stack")) ] | length
+  merged_json=$(cat "$TMP/merged" 2>/dev/null)
+  [[ -z $merged_json ]] && merged_json='[]'
+  RESTACK_NEEDED=$(jq -r --argjson merged "$merged_json" '
+    ($merged | map(.number)) as $merged_nums
+    | [ .[] | select(.body != null)
+            | select(.body | test("<!-- work-issue-stack"))
+            | select(.body | test("resolved:\\s*true") | not)
+            | (.body | capture("parent_pr:\\s*(?<n>[0-9]+)").n | tonumber) as $p
+            | select($merged_nums | index($p)) ] | length
   ' < "$TMP/prs" 2>/dev/null || echo 0)
 fi
 ```
 
-Note: this counts stacked PRs, not specifically those needing a restack — deciding that needs
-the parent's state, which is one `gh` call per stacked PR and too slow for a "zero tokens,
-instant" dashboard. Counting stacked PRs and letting the recommendation mention the restack is
-the right trade for this script; `/pipeline` (Step 5) does the precise version.
+The count is precise — it's the exact population that needs a restack, not a proxy for it —
+because both halves it needs (`$TMP/prs` with `body`, and `$TMP/merged`) are already on disk
+from the parallel `gh` calls above; no extra `gh` call is spent to get there.
 
 Make sure `body` is in the `gh pr list --json` field list where `$TMP/prs` is populated — add
 it if absent.
@@ -870,8 +889,8 @@ Insert immediately **before** the existing `PRS_OPEN -ge 1 && -n $PT_TOP` branch
 restack outranks a merge:
 
 ```bash
-  if [[ ${RESTACK_NEEDED:-0} -gt 0 && $MERGED -gt 0 ]]; then
-    echo "/work-issue restack  —  $RESTACK_NEEDED stacked PR(s) open; any whose parent merged must be restacked before merging"
+  if [[ ${RESTACK_NEEDED:-0} -gt 0 ]]; then
+    echo "/work-issue restack  —  $RESTACK_NEEDED stacked PR(s) whose parent has merged need restacking before they can merge"
     return
   fi
 ```
@@ -895,10 +914,10 @@ In `pipeline/SKILL.md`'s override cases list, add:
 
 ```markdown
 * **The script recommends merging but the top PR is a stacked child** — read its
-  `work-issue-stack` marker and check the parent's state. If the parent has merged,
-  `/work-issue restack` comes first. The script only counts stacked PRs; it can't afford the
-  per-PR `gh` call to tell which ones are actually stale, so this is the check it delegates
-  to you.
+  `work-issue-stack` marker and check the parent's state. The script already recommends
+  `/work-issue restack` ahead of any merge for a PR whose parent has merged, computed from
+  the same `gh pr list` output rather than a per-PR call; this override only fires if you
+  believe its count is stale (a parent merged in the seconds between the two runs).
 ```
 
 - [ ] **Step 6: Document the model in `WORKFLOW.md`**
