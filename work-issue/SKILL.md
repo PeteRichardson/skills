@@ -138,7 +138,28 @@ In batch mode these three checks *are* the "not already addressed by a PR" filte
 Run from the main repo, not from another worktree:
 
 1. `git fetch origin` and confirm the base branch (default branch unless the user says otherwise).
-2. Ensure `.worktrees/` is gitignored — check `.gitignore`, append the single line if absent, same one-line-entry convention `/pr-triage` uses for `.claude/tmp/`.
+2. Ensure `.worktrees/` is ignored — **without modifying any tracked file**, the same
+   convention `/pr-triage` and `/issue-triage` use for `.claude/tmp/`:
+
+   ```bash
+   git check-ignore -q .worktrees/ || cat >> .git/info/exclude <<'EOF'
+
+   # Added by the Claude Code /work-issue skill.
+   # Worktrees for in-flight issue fixes. Excluded here rather than in .gitignore
+   # so it never creates a commit diff. `git check-ignore -v <path>` will name
+   # this file as the source. Delete this block to un-ignore.
+   .worktrees/
+   EOF
+   ```
+
+   Probe with `git check-ignore`, never by grepping `.gitignore` — the latter misses a
+   global excludes entry and a `.git/info/exclude` entry, then appends a redundant line to
+   a tracked file. The probe is a silent no-op for anyone with `**/.worktrees/` in their
+   global excludes (`git config --global core.excludesFile`), which is the preferred setup,
+   and equally a no-op in a repo that already carries the line in `.gitignore`.
+
+   **When the fallback actually fires, say so once in the run output** — name the file
+   written and mention that `git check-ignore -v .worktrees/` explains the exclusion later.
 3. Create the worktree, branched from the base — or, for a `STACK` unit, from its parent:
 
    ```bash
