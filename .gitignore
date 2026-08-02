@@ -1,3 +1,8 @@
 .DS_Store
 
 .worktrees/
+
+# Owned by the hunk formula — symlinked to $(brew --prefix hunk), not forked here.
+# Recreate on a new machine after `brew install hunk`:
+#   ln -sfn "$(brew --prefix hunk)/libexec/skills/hunk-review/SKILL.md" hunk-review/SKILL.md
+hunk-review/
