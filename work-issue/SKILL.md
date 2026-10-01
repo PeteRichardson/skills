@@ -1,11 +1,11 @@
 ---
 name: work-issue
-description: Take a GitHub issue through to an open PR on its own worktree, using a branch name that carries the PR number, issue number, and review finding ID (PR68-Fix-I60-F3-rust-ps-path). Posts a resolution comment on each issue explaining what the PR proposes for that issue specifically. Use when the user types /work-issue, says "fix issue 60 on a worktree, push the branch and open a PR", "work issue 60", "start work on issue 60", or asks to do that for every open issue not already addressed by a PR. Owns branch/worktree naming, push, PR creation, the per-issue resolution comment, and worktree teardown.
+description: Take a GitHub issue through to an open PR on its own worktree, using a branch name that carries the issue number and review finding ID (Fix-I60-F3-rust-ps-path). Posts a resolution comment on each issue explaining what the PR proposes for that issue specifically. Use when the user types /work-issue, says "fix issue 60 on a worktree, push the branch and open a PR", "work issue 60", "start work on issue 60", or asks to do that for every open issue not already addressed by a PR. Owns branch/worktree naming, push, PR creation, the per-issue resolution comment, and worktree teardown.
 ---
 
 # Work Issue
 
-Take one GitHub issue from "not started" to "PR open", on a dedicated worktree, with a branch name that makes the issue number, PR number, and review finding ID all readable at a glance.
+Take one GitHub issue from "not started" to "PR open", on a dedicated worktree, with a branch name that makes the issue number and review finding ID readable at a glance.
 
 Everything from here through the `---` divider is the protocol Claude executes. The section after the divider is documentation for humans installing or maintaining this skill.
 
@@ -13,38 +13,32 @@ Everything from here through the `---` divider is the protocol Claude executes. 
 
 ## The naming scheme
 
-Three identifier spaces get conflated constantly — PR number, issue number, and `/project-review` finding ID — so all three go in the branch name, each with a distinct prefix:
+Three identifier spaces get conflated constantly — issue number, `/project-review` finding ID, and PR number. The first two go in the branch name, each with a distinct prefix:
 
 ```
-PR68-Fix-I60-F3-rust-ps-path
-└──┘     └─┘ └┘ └───────────┘
- PR #   issue  finding   slug from the issue title
+Fix-I60-F3-rust-ps-path
+    └─┘ └┘ └───────────┘
+   issue finding  slug from the issue title
 ```
 
-- `PR<n>` — added only once the PR exists (Phase 6). Absent before that.
 - `Fix` — a literal marker, not a claim about issue type. Present on every branch.
 - `I<n>` — the GitHub issue number. Always present; this skill does not run without one.
-- `F<n>` — the finding ID from a `/project-review` or `/code-review` report, if the issue records one. Omitted entirely when it doesn't — `PR71-Fix-I63-rust-shell-quote`, no empty segment.
+- `F<n>` — the finding ID from a `/project-review` or `/code-review` report, if the issue records one. Omitted entirely when it doesn't — `Fix-I63-rust-shell-quote`, no empty segment.
 - Slug — 2–4 words from the issue title, lowercased, `[a-z0-9-]` only, ≤ 32 chars.
 
 **Grouped units** — when `/issue-triage` returns a `GROUP` disposition, several issues share one branch and one PR. Every issue number appears, ascending, each with its own `I` prefix; finding IDs follow in the same order, and are omitted entirely if none of the issues has one:
 
 ```
-PR22-Fix-I11-I15-sparql-retry-set
-         └──┘└──┘ └─────────────┘
-        both issue numbers   slug describing the combined change
+Fix-I11-I15-sparql-retry-set
+    └──┘└──┘ └─────────────┘
+   both issue numbers   slug describing the combined change
 ```
 
 The slug describes what the *unit* does, not any one issue's title — a combined branch has no single title to derive from. The PR body carries one `Fixes #<n>` line per issue so GitHub closes all of them on merge. Everything else about the scheme is unchanged.
 
-Two names exist per unit:
+**One name, everywhere.** The local branch, the remote branch, the worktree directory and the PR's head branch all carry the same name, from Phase 3 to the merge. Never rename the local branch — not to add the PR number, not for any other reason. A local name that differs from its upstream's breaks the plain `git push`, and a push that names the local branch creates a new remote branch that no PR uses: CI never runs, and the stray branch outlives the merge. See "Why the PR number is not in the branch name" below.
 
-| | Name | Lives on |
-|---|---|---|
-| **Working name** | `Fix-I60-F3-rust-ps-path` | the remote branch, permanently |
-| **Final name** | `PR68-Fix-I60-F3-rust-ps-path` | the local branch only, after Phase 6 |
-
-They differ on purpose and permanently. The PR number doesn't exist until the branch has been pushed and the PR opened, and GitHub will not repoint an open PR's head branch — so the remote keeps the working name forever. Never try to reconcile them.
+The PR number is not in the name because it does not exist until after the push. `gh pr view --json number,url` from the branch, or `gh pr list --head <branch>`, gives it.
 
 ## The resolution comment
 
@@ -121,7 +115,7 @@ The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerpri
 2. **Deferred?** — stop if any label in `DEFERRAL_LABELS` is present: `backlog`, `icebox`, `someday`, `someday-maybe`, `future`, `deferred`, `on hold`, `wontfix`, or any `priority/backlog`-style namespaced equivalent. These mark work that is deliberately remembered but not scheduled; opening a PR against one makes a prioritization decision the label records as unmade. Report which label fired and offer to proceed anyway — a user who types the number themselves may well mean it, but the override must be theirs, not an assumption.
 3. **Finding ID** — scan the issue body and every comment for `/make-issues`' fingerprint marker (`<!-- project-review-finding ... -->`) and read its `finding_id:` line. Absent for hand-filed issues, `backfill`-retrofitted issues, and issues filed before the marker carried the field. Absent is normal: drop the `F<n>` segment. **Never infer an ID** by matching the issue against a review report — a report regenerated since filing may have renumbered.
 4. **Slug** — from the issue title: lowercase, strip punctuation and filler words (a, the, in, on, when, should), keep the 2–4 most specific words, join with `-`, truncate to 32 chars at a word boundary.
-5. Compose the working name and the final-name template. Show both to the user before creating anything.
+5. Compose the branch name. Show it to the user before creating anything.
 
 ## Phase 2: Is this issue already addressed?
 
@@ -164,22 +158,22 @@ Run from the main repo, not from another worktree:
 
    ```bash
    # WORK / GROUP unit — unchanged
-   git worktree add .worktrees/<working-name> -b <working-name> origin/<base>
+   git worktree add .worktrees/<branch> -b <branch> origin/<base>
 
    # STACK unit — branch from the parent's REMOTE branch
-   git worktree add .worktrees/<working-name> -b <working-name> origin/<parent working name>
+   git worktree add .worktrees/<branch> -b <branch> origin/<parent branch>
    ```
 
-   Use the parent's **remote** name (`Fix-I60-F3-…`), never its local one. Phase 6 renames the
-   local branch to carry the PR number (`PR68-Fix-I60-F3-…`); the remote name is the stable
-   identifier and is what the parent's PR actually points at.
+   Use the parent's **remote** branch (`origin/Fix-I60-F3-…`), never its local one. The local
+   copy can be behind the remote or already deleted; the remote branch is what the parent's PR
+   actually points at.
 
-   Record `git rev-parse origin/<parent working name>` now — Phase 5 writes it into the PR
+   Record `git rev-parse origin/<parent branch>` now — Phase 5 writes it into the PR
    body, and it is the value `/work-issue restack` needs later. Capture it before doing any
    work, so it names the commit this branch was actually cut from.
 4. `cd` into it. **Every** subsequent edit, build, test, and git command runs inside this worktree. Never edit files in the main checkout or a sibling worktree.
 
-The worktree directory takes the **working** name, not the final one — the PR number isn't known yet, and the directory is torn down in Phase 6 before the mismatch matters.
+The worktree directory takes the branch name.
 
 ## Phase 4: Do the work
 
@@ -189,12 +183,12 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
 
 ## Phase 5: Push and open the PR
 
-1. `git push -u origin <working-name>` — the remote branch keeps this name permanently.
+1. `git push -u origin <branch>` — the remote branch gets the same name as the local one.
 2. `gh pr create --title "<title>" --body "<body>"`. The body must contain `Fixes #<n>` so
    GitHub links the issue, and should name the finding ID (`Addresses F3 from the project
    review`) when there is one.
 
-   **For a `STACK` unit**, run `gh pr create --base <parent working name> --title "<title>"
+   **For a `STACK` unit**, run `gh pr create --base <parent branch> --title "<title>"
    --body "<body>"` — the added `--base` is what points the PR at its parent instead of the
    base branch — and include the stack marker in the body:
 
@@ -212,7 +206,7 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
 
    Never write a marker with an inferred value. If the parent's PR number isn't known yet
    because its `gh pr create` failed, this unit doesn't get created either — report and stop.
-3. Capture the PR number from the command's output. If PR creation fails, stop here — do not rename, do not tear down, do not comment. The worktree stays exactly as it is and the failure gets reported.
+3. Capture the PR number from the command's output. If PR creation fails, stop here — do not tear down, do not comment. The worktree stays exactly as it is and the failure gets reported.
 4. **Post the resolution comment** — one per issue in the unit, composed per "The resolution comment" above.
    1. **Check for an existing one first.** From the Phase 1 `gh issue view` result (or a fresh one), scan every comment for a `<!-- work-issue-resolution` marker naming this same `pr:`. If one exists, skip that issue and report it — never post a second comment for the same PR.
    2. `gh issue comment <n> --body "<comment>"`.
@@ -220,32 +214,31 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
 
    No confirmation prompt for this step. It is strictly less consequential than the `gh pr create` that immediately precedes it, and batch mode already confirms the plan up front for runs of more than ~3 units.
 
-## Phase 6: Rename, then tear down
+## Phase 6: Tear down
 
-1. **Rename the local branch**, from inside the worktree: `git branch -m PR<pr>-<working-name>`. Git moves the branch's config section with it, so upstream tracking survives and still points at the working-named remote branch.
-2. `cd` back to the main repo root.
-3. **Teardown preconditions** — check all three, and abort teardown if any fails:
+1. `cd` back to the main repo root.
+2. **Teardown preconditions** — check all three, and abort teardown if any fails:
    - `git status --porcelain` in the worktree is empty
    - `git log @{u}..` is empty (nothing unpushed)
    - the PR was created successfully in Phase 5
 
-   If any check fails, **keep the worktree**, print its absolute path and which check failed, and say the branch is renamed but the tree is still live. Never `git worktree remove --force`.
-4. `git worktree remove .worktrees/<working-name>` — by its original path; the directory was never renamed.
-5. **Keep the renamed local branch.** It's the artifact that makes `git branch -d PR68-Fix-I60-F3-rust-ps-path` work after the PR merges, and it's what `git branch` shows you when you're trying to remember which branch became which PR.
-6. Report: issue number and title, PR number and URL, the final branch name, whether the resolution comment was posted for each issue (and why not, if not), and whether the worktree was removed or kept (and why).
+   If any check fails, **keep the worktree**, print its absolute path and which check failed, and say the tree is still live. Never `git worktree remove --force`.
+3. `git worktree remove .worktrees/<branch>`.
+4. **Keep the local branch**, under its one name. It is what you come back to if the PR needs more work.
+5. Report: issue number and title, PR number and URL, the branch name, whether the resolution comment was posted for each issue (and why not, if not), and whether the worktree was removed or kept (and why).
 
 ## Coming back to a PR later
 
 The worktree is gone by design — recreate one only when you actually need to iterate or review locally:
 
 ```bash
-git worktree add .worktrees/PR68-Fix-I60-F3-rust-ps-path PR68-Fix-I60-F3-rust-ps-path   # local branch still exists
-gh pr checkout 68 --branch PR68-Fix-I60-F3-rust-ps-path                                 # it doesn't (fresh clone, other machine)
+git worktree add .worktrees/<branch> <branch>   # local branch still exists
+gh pr checkout 68                                # it doesn't (fresh clone, other machine)
 ```
 
-`gh pr checkout`'s `--branch` flag is what keeps the PR-prefixed convention intact — without it, gh names the local branch after the remote head ref, which is the un-prefixed working name.
+`gh pr checkout` names the local branch after the PR's head branch, which is the same one name, so nothing differs. A plain `git push` from that worktree goes to the PR and starts CI.
 
-**Gotcha after the rename:** `git push` with git's default `push.default=simple` refuses to push when the local branch name differs from its upstream's name, which is exactly the state Phase 6 leaves behind. To push more commits to the same PR, use an explicit refspec: `git push origin HEAD:<working-name>`. This is the main reason the rename is the *last* step rather than an early one.
+**When the remote branch changed without you** — GitHub's **Update branch** button, `gh pr update-branch`, or a restack from another machine rewrites the remote branch. Your local copy then shows as both ahead of and behind its upstream: the same change twice, with different commit IDs. Run `git pull --rebase` before you change anything, so you build on the remote version.
 
 ### Restacking a child by hand
 
@@ -370,7 +363,7 @@ For "every open issue not already addressed by a PR":
 
    If `~/.claude/skills/issue-triage/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
 4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
-5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), final branch name, comment posted y/n, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
+5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), branch name, comment posted y/n, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
 6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit
    opens a real PR. The plan names each unit's base explicitly, so a stack is visible before
    anything is pushed:
@@ -403,7 +396,7 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 
 * Never work in the main checkout — every change happens inside the issue's worktree.
 * Never delete a worktree with uncommitted or unpushed work, and never use `git worktree remove --force`. A kept worktree with a printed reason is always the correct fallback.
-* Never rename or force-push the remote branch to match the local one, and never try to repoint an open PR's head. The two names differing is the design, not a defect.
+* Never rename a branch, local or remote, and never try to repoint an open PR's head. The local branch, the remote branch, the worktree and the PR keep the one name from Phase 3 to the merge. Never push with a local name that differs from the remote's.
 * Never invent a finding ID or an issue number. An absent `F<n>` segment is correct output; a wrong one is worse than none. The same holds inside the resolution comment — no invented finding IDs, no invented file paths.
 * Never post more than one resolution comment per issue per PR. Check for the marker before posting; a duplicated note on a re-run is noise on an issue someone else is reading.
 * Never paste the same resolution comment across a grouped unit. One PR closing three issues means three different comments, each about its own issue.
@@ -450,13 +443,17 @@ This skill is deliberately repo-agnostic — plain `git worktree` and `gh`, no p
 
 Or just say it: "fix issue 60 on a worktree, push the branch and open a PR". The skill is model-invocable precisely so that phrasing works — the whole point is that the naming convention applies whether or not you remember to type the slash command.
 
-## Why the PR number is in the branch name at all
+## Why the PR number is not in the branch name
 
-Because the alternative is reading three numbers off three different surfaces. An issue number tells you what the work is; a PR number tells you where to review it; a finding ID tells you which review row it came from. `git branch` and `ls .worktrees/` only ever showed the first one, so every "which PR was this again?" required a `gh pr list`. Putting all three in one string makes `gh pr checkout 68`, `git branch -d PR68-…`, and grepping a review report all reachable from a name you're already looking at.
+An earlier version of this skill renamed the local branch after the PR opened, from `Fix-I60-F3-rust-ps-path` to `PR68-Fix-I60-F3-rust-ps-path`. The remote branch could not get the number too: `gh pr create` assigns it only after the push, and GitHub cannot change an open PR's head branch. So each unit had two names, one on each side.
 
-## Why the remote branch keeps the un-prefixed name
+In use, the two names caused more work than the number saved:
 
-Chicken-and-egg: the PR number is assigned by `gh pr create`, which needs the branch pushed first. GitHub has no API to change an open PR's head branch, so making the remote match would mean closing the PR and refiling it — losing review comments and CI history to fix a cosmetic mismatch. The local name is where the ergonomics actually live (`git branch`, `git worktree`, tab-completion), so that's where the PR number goes.
+- `git push` with `push.default=simple` refuses when the local name differs from its upstream's. The fix, `git push origin HEAD:<remote name>`, is easy to forget.
+- `git push origin PR68-…` creates a *new* remote branch. No PR uses it, so CI never runs, and the stray branch stays after the PR merges.
+- When GitHub rewrites a PR branch (the **Update branch** button, `gh pr update-branch`), the local copy falls behind. With two names it is hard to see that the local and remote branches are the same work.
+
+The PR number is one command away: `gh pr view --json number,url` on the branch, or `gh pr list --head <branch>`. The issue number and finding ID stay in the name, because they are known before the branch exists and never change.
 
 ## Why the issue gets a comment when the PR already links to it
 
@@ -481,6 +478,6 @@ Once the PR is open, the local tree has served its purpose — review happens on
 - Requires an issue. There's no "quick fix with no issue" path, by design — the branch format has nowhere to put a missing `I<n>`.
 - Batch mode is sequential. Parallel worktrees would be faster and would produce conflicting PRs on overlapping code.
 - The finding ID is only as good as what `/make-issues` recorded at filing time. Issues predating that field, and hand-filed issues, get no `F<n>` segment ever — `/make-issues backfill` deliberately doesn't invent one.
-- No cleanup of the renamed local branches after their PRs merge. `git branch -d PR68-…` stays a manual step, which is the whole reason the PR number is in the name.
+- No cleanup of local branches after their PRs merge. Deleting them stays a manual step. PRs that are rebase- or squash-merged leave commits that are not ancestors of the base, so `git branch -d` refuses them; use `-D` once the PR shows as merged.
 - The resolution comment describes the fix **as proposed**, and nothing updates it afterwards. A PR substantially rewritten in review leaves a comment that no longer matches what merged. The format is built to survive that honestly rather than to prevent it — the callout says the PR is the source of truth, and `status: proposed` in the marker is there so a future merge-time pass can flip these without re-editing the format. Nothing reads or updates that field today.
 - A run that never reaches an open PR — a failure, or a worktree kept for uncommitted work — posts no comment at all. Those are reported in-session only, so an abandoned branch leaves its issue looking untouched on GitHub.

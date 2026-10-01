@@ -16,7 +16,7 @@ The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 | 1 | Find the work | `/project-review` and/or `/code-review <scope>` | Findings with `file:line`, severity, effort | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
 | 2 | File the work | `/make-issues [--all]` | GitHub issues, labelled + fingerprinted | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:`/`source:` labels |
 | 3 | Decide what to work | `/issue-triage` | Disposition per issue + ordered work units | `.claude/tmp/issue-triage/ISSUE_TRIAGE.md` |
-| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (remote) / `PR<n>-Fix-I<n>-…` (local), open PRs, a resolution comment per issue |
+| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (one name, local and remote), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/pr-triage` | Blast-radius-ranked merge sequence | `.claude/tmp/pr-triage/PR_TRIAGE.md` |
 | 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
 
@@ -46,7 +46,8 @@ question:
 
 - `F3` — which review row this came from (why it's worth doing)
 - `#60` — the durable record of the work (what it is)
-- `PR68` — where to review it (where it lives now)
+- `PR68` — where to review it (where it lives now). Not in the branch name: it is assigned
+  after the push, and `gh pr list --head <branch>` gives it
 
 It's carried like this:
 
@@ -55,7 +56,7 @@ It's carried like this:
         ↓
 /make-issues       records finding_id: F3 in issue #60's fingerprint marker
         ↓
-/work-issue        reads it back → branch PR68-Fix-I60-F3-rust-ps-path
+/work-issue        reads it back → branch Fix-I60-F3-rust-ps-path → PR #68
         ↓
 /pr-triage         displays all three side by side in the merge table
 ```
@@ -203,8 +204,9 @@ superpowers:test-driven-development  →  write the change
 After the PR is open the worktree is gone by design. To iterate:
 
 ```bash
-git worktree add .worktrees/PR68-Fix-I60-F3-rust-ps-path PR68-Fix-I60-F3-rust-ps-path
-git push origin HEAD:Fix-I60-F3-rust-ps-path    # explicit refspec — names differ after the rename
+git worktree add .worktrees/Fix-I60-F3-rust-ps-path Fix-I60-F3-rust-ps-path
+git pull --rebase    # first, in case GitHub's "Update branch" rewrote it
+git push             # one name, local and remote: a plain push reaches the PR
 ```
 
 ## Stage 5 — Decide merge order
@@ -240,8 +242,9 @@ Deliberately not automated. Work down the stage-5 sequence one PR at a time:
 4. **Re-run `/pr-triage`** — repeat-run mode re-ranks what's left against the new base and
    tells you what changed. The previous order is invalidated by every merge; don't work down
    a stale list.
-5. `git branch -d PR68-Fix-I60-F3-rust-ps-path` when the PR is merged. The PR number in the
-   name is what makes this cheap; cleanup is manual on purpose.
+5. Delete the local branch when the PR is merged: `git branch -D Fix-I60-F3-rust-ps-path`.
+   `-D`, because a rebase- or squash-merge leaves commits that are not ancestors of `main`, so
+   `-d` refuses. Cleanup is manual on purpose.
 
 ---
 
