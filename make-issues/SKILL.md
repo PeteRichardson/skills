@@ -1,6 +1,6 @@
 ---
 name: make-issues
-description: Convert findings from a /project-review report (PROJECT_REVIEW.md) or a /code-review report into GitHub issues, with severity/category/effort labels and dedup against existing issues. Also backfills the dedup fingerprint onto pre-existing, hand-filed issues. Use when the user wants to turn review findings into tracked GitHub issues, file issues from a review report, or sync labels/fingerprints onto existing issues. Triggers on "turn these findings into issues", "file GitHub issues for the review", "make issues from the code review", "/make-issues".
+description: Convert findings from a /project-review report (PROJECT_REVIEW.md) or a /code-review report into GitHub issues, with severity/category/effort labels and dedup against existing issues. Also backfills the dedup fingerprint, any missing severity/category/effort labels, and a missing summary onto hand-filed issues. Use when the user wants to turn review findings into tracked GitHub issues, file issues from a review report, or sync labels/fingerprints onto existing issues. Triggers on "turn these findings into issues", "file GitHub issues for the review", "make issues from the code review", "/make-issues".
 disable-model-invocation: false
 ---
 
@@ -16,7 +16,7 @@ Full design rationale: `docs/specs/2026-07-21-make-issues-design.md` in this rep
 
 ## Operating principles
 
-This skill mutates GitHub — it creates issues and comments on existing ones. Always show what's about to happen before creating anything, except when nothing resembles a duplicate (the fast path — see Phase 3). Never edit the body of an issue this skill didn't create; backfilling a fingerprint onto a human-authored issue always uses a new comment, never a body edit.
+This skill mutates GitHub — it creates issues, comments on existing ones, and adds labels to them. Always show what's about to happen before creating anything, except when nothing resembles a duplicate (the fast path — see Phase 3). Never edit the body of an issue this skill didn't create, with one exception: `backfill` may prepend a summary to a body that has none (5c). Backfilling a fingerprint onto a human-authored issue always uses a new comment.
 
 Dedup is best-effort, not perfect. Matching on file path + keyword overlap will occasionally miss a real duplicate or flag a false one — that's an accepted cost, not a bug to chase. Don't add embeddings, fuzzy-matching libraries, or other heavyweight machinery to close the gap.
 
@@ -27,7 +27,7 @@ Dedup is best-effort, not perfect. Matching on file path + keyword overlap will 
    - `/make-issues <path>` — explicit path to either a `PROJECT_REVIEW.md`-shaped file or a `/code-review` report.
    - `[path] --all` — project-review: drop the severity filter. code-review: no-op (see Phase 1), accepted without error.
    - `[path] -f <ids...>` — process only the named findings (project-review: `F3`-style IDs; code-review: ordinals like `1`, `3`).
-   - `/make-issues backfill` — skip straight to Phase 5. No source doc involved.
+   - `/make-issues backfill [#n ...]` — skip straight to Phase 5. No source doc involved. With issue numbers, only those issues.
 2. Read the resolved path. Missing → tell the user to run `/project-review` (if it was the default path) or point at a valid `/code-review` report, then stop. Don't guess at findings from memory or a stale read.
 3. Detect source format from the file itself:
    - **Project-review**: contains a Findings table with an `ID` column (rows like `| F1 | ... |`).
@@ -135,9 +135,11 @@ This is a **baseline, not a closed set** — matches `/project-review`'s own now
 
 ## Phase 5: Backfill (subcommand)
 
-`/make-issues backfill` — retrofits the fingerprint onto pre-existing, hand-filed issues so they participate in future dedup searches. Independent of either review doc; can be run any time.
+`/make-issues backfill` gives hand-filed issues what a filed issue gets: the fingerprint, so they take part in future dedup searches; the `severity:`/`category:`/`effort:` labels, so label filters see them; and the summary at the top. Independent of either review doc; can be run any time. `backfill #12 #15` scopes every pass to those issues, in any state.
 
-1. `gh issue list --state all --json number,title,body,comments` for the whole repo (open and closed — deliberately, so a matching closed issue is still found later).
+### 5a: Fingerprint
+
+1. `gh issue list --state all --json number,title,body,comments,labels` for the whole repo (open and closed — deliberately, so a matching closed issue is still found later).
 2. For each issue with no fingerprint marker already present (checked in the body and in every comment): determine whether it references specific code in this repo (file paths, function/type names, a stack trace, etc.). If it doesn't look code-related (a feature request with no concrete code references, a question, etc.), skip it — don't force a fit.
 3. For code-related issues: infer the file(s) it concerns, a category resolved per Phase 4's steps, and keywords the same way Phase 2 does (literal identifiers, not paraphrase).
 4. Post a **new comment** (never edit the original body) containing the marker, with `source: backfill` since it wasn't produced by either review tool. Omit `finding_id` entirely — a hand-filed issue has no source report row, and inferring one by matching it against a current report would fabricate provenance:
@@ -150,6 +152,31 @@ This is a **baseline, not a closed set** — matches `/project-review`'s own now
    -->
    ```
 
+### 5b: Labels
+
+A label **fills a gap**: it goes only into a namespace (`severity:`, `category:`, `effort:`) where the issue has no label yet. Labels a person already applied stay exactly as they are.
+
+1. **Scope.** Open issues only — a label on a closed issue steers no triage. An explicit `#n` list overrides this.
+2. **Assess** a value for each empty namespace, from the issue's title, body and comments. On a hand-filed issue (no `source:` label), assess the filled namespaces too, for step 3. Decide each value from the text before you look at the issue's labels, so the current label does not anchor the result:
+   - `severity:` — the Low/Medium/High/Critical scale the review tools use: the impact on the user, or on the maintainer when nothing is user-visible. A feature request takes the severity of the gap it fills (usually Low or Medium).
+   - `category:` — resolve per Phase 4's three steps. Reuse the 5a category when 5a fingerprinted this issue, so the marker and the label agree. A feature request with no debt or defect in it usually has no fitting category: leave the namespace empty.
+   - `effort:` — S (one focused change), M (several files or a design choice), L (a restructure or a multi-PR feature), judged from the scope the issue describes.
+   Each namespace the text gives no basis for stays empty, shown as `—`. An empty cell is an honest result; a guessed label is a bug.
+3. **Compare** each assessed value of a filled namespace with the label already there. Every difference is a **disagreement**: one line with the issue, the namespace, the current and the assessed value, and a short reason (`#340 effort: S → M — needs a pending-digit state and a keymap change`). Disagreements are advisory. They go to the report, never into a label. Issues with a `source:` label are skipped here: a review tool set those labels from more evidence than the issue text holds.
+4. **Confirm** the proposals together with 5c's, in one table (see 5c step 3).
+5. **Apply** the confirmed labels with `gh issue edit <n> --add-label ...`, after ensuring each label exists (Phase 4). `source:` labels record which tool filed an issue, so a hand-filed issue gets none.
+6. **Report** the count per namespace, the issues left with an empty namespace, any new category minted, and a **Disagreements** section with the step 3 lines (or "none").
+
+### 5c: Summary
+
+A summary is **added, never rewritten**: a person may have curated an existing one, and a rewrite risks losing that.
+
+1. **Scope** — the 5b scope, minus every issue whose body already contains `**SUMMARY:**`, wherever it sits and whoever wrote it.
+2. **Draft** the summary from the issue's title, body and comments, in the format the user's global `CLAUDE.md` "GitHub issues" rule defines (a `> **SUMMARY:**` blockquote, then `---`).
+3. **Show one table** covering 5b and 5c — issue number, title, proposed labels with a short reason, proposed summary — and ask for confirmation. The user may accept all, drop rows, or change a value. Apply nothing before the answer.
+4. **Prepend** each confirmed summary. Fetch the body again just before the write; if it changed since the draft, or it now contains `**SUMMARY:**`, skip that issue and say so. Otherwise write the summary block, a blank line, then the fetched body byte for byte (`gh issue edit <n> --body-file <file>`, so no shell quoting touches it).
+5. **Report** the issues that got a summary and the issues skipped.
+
 ## Next in the pipeline
 
 This skill is stage 2 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line:
@@ -158,17 +185,18 @@ This skill is stage 2 of the review → issue → PR → merge pipeline (`~/.cla
 
 Vary it only for these cases:
 
-* **A `backfill` run** — same line, but note that triage is now meaningfully cheaper on this repo: the fingerprints just written are the file-overlap signal its Phase 2 reads.
+* **A `backfill` run** — same line, but note that triage is now meaningfully cheaper on this repo: the fingerprints just written are the file-overlap signal its Phase 2 reads, and the new `severity:` labels feed its ordering.
 * **Fewer than ~3 issues created and none share a file** — say triage is optional at this size and `/work-issue <n>` directly is reasonable. Still mention it if any two do share a file; that's the case grouping exists for.
 * **Nothing was created** (everything deduped to existing issues) — recommend `/issue-triage` anyway. The queue is unchanged, not empty.
 
 ## Rules
 
-- Never edit an issue's original body unless this skill created that issue in this same run.
+- Never edit an issue's original body unless this skill created that issue in this same run. The one exception is 5c: prepend a confirmed summary to a body that has none, and leave every other byte as it was.
 - Never skip the Phase 3 dedup search, even for a single `-f`-scoped finding.
 - Always run the Phase 4 category resolution steps in order (existing repo labels, then vendored baseline, then mint new) — never skip straight to minting a new category, and never force a bad fit against an existing one just to avoid creating a label.
 - Stop and report rather than guess when: the source path is missing, matches neither known format, or `gh` reports an authentication/API error. No silent retries.
 - `-f`/ordinal values not found in the source doc are reported as skipped; the rest of the run continues.
+- `backfill` adds labels only to an empty namespace, and only after the user confirms the 5b/5c table. It never removes or changes a label.
 
 ---
 
@@ -199,7 +227,8 @@ In the repo you want to file issues into:
 /make-issues -f F3 F5 F9              # only those finding IDs
 /make-issues docs/reviews/code-review_src_2026-07-21.md          # a code-review report, every finding
 /make-issues docs/reviews/code-review_src_2026-07-21.md -f 1 3   # only those ordinals from that report
-/make-issues backfill                 # retrofit fingerprints onto existing hand-filed issues
+/make-issues backfill                 # fingerprints, missing labels and missing summaries on hand-filed issues
+/make-issues backfill #12 #15         # the same, for those issues only
 ```
 
 ## Why this stays a separate skill from `/project-review` and `/code-review`
