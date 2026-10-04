@@ -46,7 +46,7 @@ fi
 if git fetch -q origin "$default" 2>/dev/null; then
     read -r behind ahead < <(git rev-list --left-right --count "origin/$default...HEAD")
     if [ "$ahead" != 0 ] || [ "$behind" != 0 ]; then
-        stop "$default is $ahead commit(s) ahead of and $behind behind origin/$default. Push or pull first."
+        stop "HEAD is $ahead commit(s) ahead of and $behind behind origin/$default. Push or pull first."
     fi
 else
     stop "cannot fetch origin/$default."
