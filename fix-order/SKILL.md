@@ -61,7 +61,7 @@ Check the invocation before doing anything else:
 2. `gh issue list --state open --limit 200 --json number,title,body,comments,labels,createdAt,updatedAt,url`
 3. **Exclude already-deferred issues.** Any issue carrying `backlog`, `icebox`, `someday`, `someday-maybe`, `future`, `deferred`, `on hold`, `wontfix`, or a `priority/backlog`-style namespaced equivalent is out of scope — that decision is already made. List them once as excluded, with the label that fired, so a mislabelled issue stays visible. This vocabulary is shared with `/work-issue`'s Phase 1 deferral check; keep the two lists in sync.
 4. **Exclude already-addressed issues** using `/work-issue`'s Phase 2 checks: an open PR whose `closingIssuesReferences` names it, a PR `headRefName` matching `(^|-)I?<n>(-|$)`, or a local/remote branch matching the same pattern. Report each with which check fired.
-5. **Read the `/make-issues` fingerprint** for each surviving issue — scan the body and every comment for `<!-- project-review-finding ... -->` and extract `file:`, `category:`, `keywords:`, and `finding_id:` if present. This is the cheapest source of the file-overlap signal Phase 2 needs, and issues carrying it need no code reading to place. Absent is normal (hand-filed, or `backfill`-retrofitted without one) — fall back to reading the issue text for cited paths and symbols. Never infer a `finding_id` that isn't recorded.
+5. **Read the `/make-issues` fingerprint** for each surviving issue — scan the body and every comment for `<!-- project-review-finding ... -->` and extract `file:`, `category:`, `keywords:`, and `finding_id:` if present. This is the cheapest source of the file-overlap signal Phase 2 needs, and issues carrying it need no code reading to place. Absent is normal (hand-filed, or fingerprinted by `/issue-triage`, which never writes a `finding_id`) — fall back to reading the issue text for cited paths and symbols. Never infer a `finding_id` that isn't recorded.
 
 ## Phase 2: Build the relationship graph
 
@@ -384,7 +384,7 @@ The reason it's a separate subcommand rather than a step at the end of a fix-ord
 The intended loop:
 
 1. `/project-review` or `/code-review` — find the work
-2. `/make-issues` (or `backfill`) — file it, with labels and fingerprints
+2. `/make-issues` — file it; `/issue-triage` — complete every issue (summary, labels, fingerprint)
 3. `/fix-order` — decide what to work, in what order, what to combine, what to drop
 4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5, including Phase 4.5, as a sub-protocol to order its queue)
 5. `/pr-triage` — order the resulting PR queue
@@ -392,7 +392,7 @@ The intended loop:
 
 Step 3 replaces what used to be a manual pass of labelling things `backlog` by hand.
 
-There's a real synergy with `/make-issues`: the fingerprint marker it writes carries a `file:` field, which is exactly the file-overlap signal Phase 2 needs. On a repo where every issue has been through `/make-issues` or `backfill`, most of Phase 2 is free. On a repo of hand-filed issues, Phase 2 has to read issue prose instead, and its `OVERLAPS` edges are correspondingly less reliable.
+There's a real synergy with `/make-issues`: the fingerprint marker it writes carries a `file:` field, which is exactly the file-overlap signal Phase 2 needs. On a repo where every issue has been through `/make-issues` or `/issue-triage`, most of Phase 2 is free. On a repo of hand-filed issues, Phase 2 has to read issue prose instead, and its `OVERLAPS` edges are correspondingly less reliable.
 
 ## Why file overlap alone doesn't justify grouping
 

@@ -115,7 +115,7 @@ Do this once per PR — both the severity override below and the Phase 5 tables 
 
 1. `gh pr view <N> --json closingIssuesReferences` — catches "Fixes #N" / "Closes #N" in the PR body. Record every linked issue number. A PR with no linked issue is normal, not an error.
 2. `gh issue view <N> --json labels,title,body,comments` for each linked issue. Scan the body and every comment for `/make-issues`' fingerprint marker (`<!-- project-review-finding ... -->`) and read its `finding_id:` line — that's the `F3`-style ID from the `/project-review` report, or the bare ordinal from a `/code-review` report, that filed the issue.
-3. An issue filed by hand, retrofitted by `/make-issues backfill`, or created before the marker carried `finding_id` won't have one. Record it as absent and move on — never infer an ID by matching titles or by re-reading a review report, since a report regenerated since the issue was filed may have renumbered.
+3. An issue filed by hand, fingerprinted by `/issue-triage`, or created before the marker carried `finding_id` won't have one. Record it as absent and move on — never infer an ID by matching titles or by re-reading a review report, since a report regenerated since the issue was filed may have renumbered.
 
 Both are provenance for display only — neither feeds the ranking, and a `finding_id` that no longer matches the current report is expected rather than a discrepancy to chase.
 

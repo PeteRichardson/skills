@@ -62,7 +62,7 @@ It's carried like this:
 ```
 
 Rule that holds at every stage: **an absent ID is correct output; an inferred one is a bug.**
-Hand-filed issues have no `F<n>` and never get one — `/make-issues backfill` deliberately
+Hand-filed issues have no `F<n>` and never get one — `/issue-triage` deliberately
 won't invent one, and neither will `/work-issue` or `/pr-triage`.
 
 ---
@@ -101,20 +101,23 @@ history so a deleted `PROJECT_REVIEW.md` can't cause an ID collision with issues
 /make-issues --all                 # every finding, including Low
 /make-issues -f F3 F5 F9           # just these
 /make-issues docs/reviews/code-review_src_2026-07-21.md
-/make-issues backfill              # retrofit fingerprints onto hand-filed issues
+/issue-triage                      # complete hand-filed issues: summary, labels, fingerprint
 ```
 
 This is the first stage that **mutates GitHub**. It creates issues, seeds the label
 vocabulary if missing, and dedups against existing issues (open *and* closed) by file path +
-keyword overlap. Above ~20% overlap it pauses and asks; below that it just creates.
+keyword overlap. Above ~20% overlap it pauses and asks; below that it just creates. Then it
+calls `/issue-triage` on the new issues, which adds the summary and any missing labels.
 
-Run `backfill` once per repo that has pre-existing hand-filed issues. It adds the fingerprint
-as a *comment* (never a body edit) so those issues participate in future dedup — and, more
-importantly, so stage 3 can see their `file:` field.
+`/issue-triage` is the gate for **every** issue: from `/make-issues`, from `/to-spec` or
+`/to-tickets`, or filed by hand. Run it after you file an issue by hand. It adds the
+fingerprint as a *comment* (never a body edit) so the issue takes part in future dedup — and,
+more importantly, so stage 3 can see its `file:` field. `/issue-triage --verify` also
+reproduces each issue once and records the steps in it (opt-in).
 
 **Why the fingerprint matters downstream:** the `file:` field is exactly the overlap signal
 `/fix-order` Phase 2 needs. On a repo where every issue went through `/make-issues` or
-`backfill`, most of `/fix-order` is free. On a repo of raw hand-filed issues, `/fix-order` has to infer
+`/issue-triage`, most of `/fix-order` is free. On a repo of raw hand-filed issues, `/fix-order` has to infer
 paths from prose and its grouping is correspondingly weaker.
 
 ## Stage 3 — Decide what to work

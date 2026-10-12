@@ -1,7 +1,7 @@
 ---
 name: make-issues
-argument-hint: "[path] [--all] [-f IDs...] | backfill [#n ...]"
-description: Convert findings from a /project-review report (PROJECT_REVIEW.md) or a /code-review report into GitHub issues, with severity/category/effort labels and dedup against existing issues. Also backfills the dedup fingerprint, any missing severity/category/effort labels, and a missing summary onto hand-filed issues. Use when the user wants to turn review findings into tracked GitHub issues, file issues from a review report, or sync labels/fingerprints onto existing issues. Triggers on "turn these findings into issues", "file GitHub issues for the review", "make issues from the code review", "/make-issues".
+argument-hint: "[path] [--all] [-f IDs...]"
+description: Convert findings from a /project-review report (PROJECT_REVIEW.md) or a /code-review report into GitHub issues, with severity/category/effort labels and dedup against existing issues, then hands the new issues to /issue-triage to add a summary and any missing labels. Use when the user wants to turn review findings into tracked GitHub issues or file issues from a review report. For a hand-filed issue, use /issue-triage instead. Triggers on "turn these findings into issues", "file GitHub issues for the review", "make issues from the code review", "/make-issues".
 disable-model-invocation: false
 ---
 
@@ -17,7 +17,9 @@ Full design rationale: `docs/specs/2026-07-21-make-issues-design.md` in this rep
 
 ## Operating principles
 
-This skill mutates GitHub — it creates issues, comments on existing ones, and adds labels to them. Always show what's about to happen before creating anything, except when nothing resembles a duplicate (the fast path — see Phase 3). Never edit the body of an issue this skill didn't create, with one exception: `backfill` may prepend a summary to a body that has none (5c). Backfilling a fingerprint onto a human-authored issue always uses a new comment.
+This skill mutates GitHub — it creates issues, comments on existing ones, and adds labels to them. Always show what's about to happen before creating anything, except when nothing resembles a duplicate (the fast path — see Phase 3). Never edit the body of an issue this skill didn't create.
+
+**The vocabulary lives in `/issue-triage`.** The label list, the label seeding, the category resolution, the summary format and the fingerprint format are defined once, in `~/.claude/skills/issue-triage/SKILL.md` ("The vocabulary"). Read that section before Phase 1 and use it as written. Never keep a copy here: a second copy is what drifts.
 
 Dedup is best-effort, not perfect. Matching on file path + keyword overlap will occasionally miss a real duplicate or flag a false one — that's an accepted cost, not a bug to chase. Don't add embeddings, fuzzy-matching libraries, or other heavyweight machinery to close the gap.
 
@@ -28,7 +30,7 @@ Dedup is best-effort, not perfect. Matching on file path + keyword overlap will 
    - `/make-issues <path>` — explicit path to either a `PROJECT_REVIEW.md`-shaped file or a `/code-review` report.
    - `[path] --all` — project-review: drop the severity filter. code-review: no-op (see Phase 1), accepted without error.
    - `[path] -f <ids...>` — process only the named findings (project-review: `F3`-style IDs; code-review: ordinals like `1`, `3`).
-   - `/make-issues backfill [#n ...]` — skip straight to Phase 5. No source doc involved. With issue numbers, only those issues.
+   - `/make-issues backfill [...]` — removed. Say that `/issue-triage [#n ...]` does this job now, and stop.
 2. Read the resolved path. Missing → tell the user to run `/project-review` (if it was the default path) or point at a valid `/code-review` report, then stop. Don't guess at findings from memory or a stale read.
 3. Detect source format from the file itself:
    - **Project-review**: contains a Findings table with an `ID` column (rows like `| F1 | ... |`).
@@ -52,7 +54,7 @@ Every finding, regardless of source, is normalized to: `{ id_or_ordinal, title, 
 - Parse each `### N. [Issue name] (TIER) ...` section (TIER ∈ {HIGH, IDIOM, MEDIUM, LOW}) into: ordinal N, tier, Location (file:line), Issue text, Evidence snippet, and tier-specific extras — HIGH: Impact; IDIOM: Severity (already derived in the report — see `code-review/SKILL.md`'s IDIOM section) + score breakdown + idiomatic-alternative comparison; MEDIUM: score breakdown.
 - If an IDIOM section predates the derived-severity report format (no `Severity:` in its heading), derive it inline from the Importance score: ≥ 7/10 → High, otherwise → Medium (never Low).
 - Map tier → severity: HIGH → High (bump to Critical only if the finding's own text clearly signals something beyond code-review's normal HIGH bar, e.g. active data loss — a judgment call, not a default), MEDIUM → Medium, LOW → Low, IDIOM → its derived severity.
-- `categories[]`: IDIOM tier → always `["IDIOM"]`. Otherwise, resolve via Phase 4's category resolution steps — biased by tier as a prior (HIGH usually → Security hygiene, Correctness & memory safety (crashes/leaks/UAF), or Data integrity & robustness (silent data loss without a crash); MEDIUM/LOW usually → Error handling & observability, Performance & resource hygiene, Architectural decay, Consistency rot, or Documentation drift, depending on content) but not forced; pick whatever actually fits the text.
+- `categories[]`: IDIOM tier → always `["IDIOM"]`. Otherwise, resolve via `/issue-triage`'s "Category resolution" steps — biased by tier as a prior (HIGH usually → Security hygiene, Correctness & memory safety (crashes/leaks/UAF), or Data integrity & robustness (silent data loss without a crash); MEDIUM/LOW usually → Error handling & observability, Performance & resource hygiene, Architectural decay, Consistency rot, or Documentation drift, depending on content) but not forced; pick whatever actually fits the text.
 - `effort_or_null` = null always (code-review has no effort concept).
 - Scope: default = every finding in the report (already curated to ~10 by `/code-review` itself — a second severity filter adds little). `--all` = same, accepted as a no-op rather than rejected. `-f 1 3` = only those ordinals, scoped to this one report file; report and skip any not found.
 - **Never file the `## Out of scope (pre-existing)` section** that PR-mode reports carry. Those entries are names and locations only — no tier, no severity, no evidence — so filing them means inventing two labels and an issue body, and an inferred value is a bug (see `WORKFLOW.md`). Say in the run summary how many were listed and skipped, and that `/code-review <those paths>` turns them into real findings that this skill can file.
@@ -65,17 +67,8 @@ For every finding in scope:
 2. **Body** — source-appropriate fields, human-readable:
    - *Project-review*: Description, Recommendation, `File:Line`, Severity, Effort.
    - *Code-review*: Issue text, Evidence snippet, Location, and Impact (HIGH) or the score breakdown + idiomatic-alternative comparison (IDIOM) or score breakdown (MEDIUM).
-3. **Keywords** — literal identifiers/symbol names the finding cites (function names, types, variables — copied, not paraphrased) plus 1–3 short concept terms (e.g. "hash collision", "duplicate mapping"). These need to be reproducible tokens grounded in the finding's own text, not a paraphrase that could vary between runs.
-4. **Fingerprint marker** — appended to the body:
-   ```html
-   <!-- project-review-finding
-   source: project-review|code-review
-   finding_id: <F3 (project-review) or the bare ordinal, e.g. 3 (code-review)>
-   file: <path>
-   category: <primary category>
-   keywords: <comma-separated>
-   -->
-   ```
+3. **Keywords** — per `/issue-triage`'s "Fingerprint format": literal identifiers the finding cites, plus 1–3 short concept terms.
+4. **Fingerprint marker** — appended to the body, in `/issue-triage`'s "Fingerprint format", with `source: project-review` or `source: code-review`, and `finding_id:` set to `F3` (project-review) or the bare ordinal, e.g. `3` (code-review).
    `finding_id` is provenance only — a breadcrumb back to the report row that filed this issue, so a reader (or `/pr-triage`, which surfaces it next to the PR and issue number) can line the three identifiers up without re-deriving anything. It records the ID **as filed** and is never revised: a regenerated report may renumber, and a stale `finding_id` is expected, not an error. It is never a dedup key — see "Why dedup keys on file path + keyword overlap" below.
 5. **Labels to apply**: one `severity: <X>`, one or more `category: <X>` (one per entry in `categories[]`), `effort: <X>` if not null, and `source: project-review` or `source: code-review`.
 
@@ -83,100 +76,20 @@ For every finding in scope:
 
 For each composed candidate, in order:
 
-1. Search: `gh issue list --search "<file path>" --state all --json number,title,url,body,state`. `--state all` deliberately includes closed issues — a closed "fixed" issue reappearing as a live finding is meaningful signal, and `backfill` (Phase 5) covers closed issues too, so search should be consistent with that.
-2. For each result, extract its stored `keywords:` — from the body (issues this skill created) or from any comment containing the marker (backfilled issues). Score plain Jaccard overlap (`|intersection| / |union|`, case-insensitive, whitespace-trimmed) against this finding's own keyword set.
+1. Search: `gh issue list --search "<file path>" --state all --json number,title,url,body,state`. `--state all` deliberately includes closed issues — a closed "fixed" issue reappearing as a live finding is meaningful signal, and `/issue-triage #n` covers closed issues too, so search should be consistent with that.
+2. For each result, extract its stored `keywords:` — from the body (issues this skill created) or from any comment containing the marker (issues that `/issue-triage` fingerprinted). Score plain Jaccard overlap (`|intersection| / |union|`, case-insensitive, whitespace-trimmed) against this finding's own keyword set.
 3. Sort by score descending. Keep the top result, plus any others within ~5 points of it (a real tie).
 4. **No candidates, or top score below ~20%**: create immediately — `gh issue create --title "<title>" --body "<body+marker>" --label "severity: X" --label "category: Y" [--label "effort: Z"] --label "source: <tool>"`. No pause.
 5. **Top score at or above ~20%**: pause. Show the matched issue's title, direct URL, state (open/closed — note explicitly if closed, e.g. "closed as wontfix" vs "closed as fixed", since a rejected duplicate is a different signal than a resolved one), and the overlap score (plus ties). Ask: create anyway, or skip this finding. Move to the next finding either way.
-6. Before the first `gh issue create` call in a run, ensure the target repo has all labels this run will use (Phase 4) — create any missing ones first.
+6. Before the first `gh issue create` call in a run, ensure the target repo has all labels this run will use, per `/issue-triage`'s "Labels" seeding rule — create any missing ones first.
 
-## Phase 4: Label seeding and category resolution
+Apply only the labels the **report states**: `severity:`, `category:` (as resolved above), `effort:` when the report has one, and `source:`. They are facts from the report. Leave every other namespace empty; Phase 4 fills it.
 
-Vendored baseline — 23 labels (13 category + 4 severity + 3 effort + 2 source + 1 status), matching `/project-review`'s current Phase 2 dimensions and `/code-review`'s severity/IDIOM tiers:
+## Phase 4: Complete the filed issues
 
-```
-category: Architectural decay              #d4c5f9
-category: Consistency rot                  #d4c5f9
-category: Type & contract debt             #d4c5f9
-category: Dependency & config debt         #d4c5f9
-category: Test debt                        #d4c5f9
-category: Documentation drift              #d4c5f9
-category: Error handling & observability   #d4c5f9
-category: UX & CLI ergonomics              #d4c5f9
-category: IDIOM                            #d4c5f9
-category: Performance & resource hygiene   #d4c5f9
-category: Security hygiene                 #d4c5f9
-category: Correctness & memory safety      #d4c5f9
-category: Data integrity & robustness      #d4c5f9
+After the last create, call `/issue-triage` with the numbers of the issues this run created (Skill tool, `issue-triage`, args `#n #m ...`). It adds the summary to each one, fills empty label namespaces (for example `effort:` on a `/code-review` finding, which has no effort), and shows its one confirmation table. No verification: `/issue-triage` verifies only with `--verify`.
 
-severity: Critical   #b60205
-severity: High        #d73a4a
-severity: Medium      #fbca04
-severity: Low         #0e8a16
-
-effort: L   #1d76db
-effort: M   #5319e7
-effort: S   #c5def5
-
-source: project-review   #bfd4f2
-source: code-review      #bfd4f2
-
-status: needs-decision   #d876e3
-```
-
-`status:` is a workflow axis rather than a property of the finding, which is why it's a namespace of its own rather than another `category:`. **This skill never applies it and never creates it** — it's listed here because this file owns the label vocabulary, and `/fix-order label` (its only writer) needs a canonical name and color to reuse instead of minting a variant. Seeding a label nothing in this run will use would leave an unused label on every repo that never runs `/fix-order label`.
-
-This is a **baseline, not a closed set** — matches `/project-review`'s own now-extensible Phase 2 vocabulary (favor reuse, allow a new category when genuinely justified). For every `category:` value a finding names, resolve it in this order before applying a label:
-
-1. **Exact or close semantic match against this repo's existing `category:` labels** (`gh label list`) — a finding tagged "Data consistency" should reuse an existing `category: Data integrity & robustness` label rather than mint a near-duplicate. This is a judgment call, not a strict string match.
-2. **Exact or close semantic match against the vendored baseline above** — reuse its exact name/color.
-3. **Otherwise, it's genuinely new** — create it with `gh label create "category: <name>" --color "d4c5f9" --description "PROJECT_REVIEW.md / code-review label"`, and mention the new category in this run's summary so it's visible rather than silently added.
-
-`severity:`/`effort:`/`source:`/`status:` labels stay closed (they're structural, not open classification) — never resolve one through the three steps above, and never mint a new value in these namespaces. Check with `gh label list` before the first create of a run and create anything missing from `severity:`/`effort:`/`source:`; leave `status:` alone, per the note above.
-
-## Phase 5: Backfill (subcommand)
-
-`/make-issues backfill` gives hand-filed issues what a filed issue gets: the fingerprint, so they take part in future dedup searches; the `severity:`/`category:`/`effort:` labels, so label filters see them; and the summary at the top. Independent of either review doc; can be run any time. `backfill #12 #15` scopes every pass to those issues, in any state.
-
-### 5a: Fingerprint
-
-1. `gh issue list --state all --json number,title,body,comments,labels` for the whole repo (open and closed — deliberately, so a matching closed issue is still found later).
-2. For each issue with no fingerprint marker already present (checked in the body and in every comment): determine whether it references specific code in this repo (file paths, function/type names, a stack trace, etc.). If it doesn't look code-related (a feature request with no concrete code references, a question, etc.), skip it — don't force a fit.
-3. For code-related issues: infer the file(s) it concerns, a category resolved per Phase 4's steps, and keywords the same way Phase 2 does (literal identifiers, not paraphrase).
-4. Post a **new comment** (never edit the original body) containing the marker, with `source: backfill` since it wasn't produced by either review tool. Omit `finding_id` entirely — a hand-filed issue has no source report row, and inferring one by matching it against a current report would fabricate provenance:
-   ```html
-   <!-- project-review-finding
-   source: backfill
-   file: <path>
-   category: <category>
-   keywords: <comma-separated>
-   -->
-   ```
-
-### 5b: Labels
-
-A label **fills a gap**: it goes only into a namespace (`severity:`, `category:`, `effort:`) where the issue has no label yet. Labels a person already applied stay exactly as they are.
-
-1. **Scope.** Open issues only — a label on a closed issue steers no ordering. An explicit `#n` list overrides this.
-2. **Assess** a value for each empty namespace, from the issue's title, body and comments. On a hand-filed issue (no `source:` label), assess the filled namespaces too, for step 3. Decide each value from the text before you look at the issue's labels, so the current label does not anchor the result:
-   - `severity:` — the Low/Medium/High/Critical scale the review tools use: the impact on the user, or on the maintainer when nothing is user-visible. A feature request takes the severity of the gap it fills (usually Low or Medium).
-   - `category:` — resolve per Phase 4's three steps. Reuse the 5a category when 5a fingerprinted this issue, so the marker and the label agree. A feature request with no debt or defect in it usually has no fitting category: leave the namespace empty.
-   - `effort:` — S (one focused change), M (several files or a design choice), L (a restructure or a multi-PR feature), judged from the scope the issue describes.
-   Each namespace the text gives no basis for stays empty, shown as `—`. An empty cell is an honest result; a guessed label is a bug.
-3. **Compare** each assessed value of a filled namespace with the label already there. Every difference is a **disagreement**: one line with the issue, the namespace, the current and the assessed value, and a short reason (`#340 effort: S → M — needs a pending-digit state and a keymap change`). Disagreements are advisory. They go to the report, never into a label. Issues with a `source:` label are skipped here: a review tool set those labels from more evidence than the issue text holds.
-4. **Confirm** the proposals together with 5c's, in one table (see 5c step 3).
-5. **Apply** the confirmed labels with `gh issue edit <n> --add-label ...`, after ensuring each label exists (Phase 4). `source:` labels record which tool filed an issue, so a hand-filed issue gets none.
-6. **Report** the count per namespace, the issues left with an empty namespace, any new category minted, and a **Disagreements** section with the step 3 lines (or "none").
-
-### 5c: Summary
-
-A summary is **added, never rewritten**: a person may have curated an existing one, and a rewrite risks losing that.
-
-1. **Scope** — the 5b scope, minus every issue whose body already contains `**SUMMARY:**`, wherever it sits and whoever wrote it.
-2. **Draft** the summary from the issue's title, body and comments, in the format the user's global `CLAUDE.md` "GitHub issues" rule defines (a `> **SUMMARY:**` blockquote, then `---`).
-3. **Show one table** covering 5b and 5c — issue number, title, proposed labels with a short reason, proposed summary — and ask for confirmation. The user may accept all, drop rows, or change a value. Apply nothing before the answer.
-4. **Prepend** each confirmed summary. Fetch the body again just before the write; if it changed since the draft, or it now contains `**SUMMARY:**`, skip that issue and say so. Otherwise write the summary block, a blank line, then the fetched body byte for byte (`gh issue edit <n> --body-file <file>`, so no shell quoting touches it).
-5. **Report** the issues that got a summary and the issues skipped.
+Skip this phase when the run created nothing.
 
 ## Next in the pipeline
 
@@ -186,18 +99,16 @@ This skill is stage 2 of the review → issue → PR → merge pipeline (`~/.cla
 
 Vary it only for these cases:
 
-* **A `backfill` run** — same line, but note that `/fix-order` is now meaningfully cheaper on this repo: the fingerprints just written are the file-overlap signal its Phase 2 reads, and the new `severity:` labels feed its ordering.
 * **Fewer than ~3 issues created and none share a file** — say `/fix-order` is optional at this size and `/work-issue <n>` directly is reasonable. Still mention it if any two do share a file; that's the case grouping exists for.
 * **Nothing was created** (everything deduped to existing issues) — recommend `/fix-order` anyway. The queue is unchanged, not empty.
 
 ## Rules
 
-- Never edit an issue's original body unless this skill created that issue in this same run. The one exception is 5c: prepend a confirmed summary to a body that has none, and leave every other byte as it was.
+- Never edit an issue's original body unless this skill created that issue in this same run.
 - Never skip the Phase 3 dedup search, even for a single `-f`-scoped finding.
-- Always run the Phase 4 category resolution steps in order (existing repo labels, then vendored baseline, then mint new) — never skip straight to minting a new category, and never force a bad fit against an existing one just to avoid creating a label.
+- Always run `/issue-triage`'s category resolution steps in order (existing repo labels, then baseline, then mint new) — never skip straight to minting a new category, and never force a bad fit against an existing one just to avoid creating a label.
 - Stop and report rather than guess when: the source path is missing, matches neither known format, or `gh` reports an authentication/API error. No silent retries.
 - `-f`/ordinal values not found in the source doc are reported as skipped; the rest of the run continues.
-- `backfill` adds labels only to an empty namespace, and only after the user confirms the 5b/5c table. It never removes or changes a label.
 
 ---
 
@@ -228,9 +139,9 @@ In the repo you want to file issues into:
 /make-issues -f F3 F5 F9              # only those finding IDs
 /make-issues docs/reviews/code-review_src_2026-07-21.md          # a code-review report, every finding
 /make-issues docs/reviews/code-review_src_2026-07-21.md -f 1 3   # only those ordinals from that report
-/make-issues backfill                 # fingerprints, missing labels and missing summaries on hand-filed issues
-/make-issues backfill #12 #15         # the same, for those issues only
 ```
+
+Hand-filed issues: `/issue-triage` (it replaced `/make-issues backfill`).
 
 ## Why this stays a separate skill from `/project-review` and `/code-review`
 
@@ -254,7 +165,7 @@ The first real run against `t` (16 findings) already produced 2 findings whose b
 
 - Dedup is best-effort. A file rename/move breaks the fingerprint's most reliable signal (falls back to keyword-only matching, weaker). Occasional duplicate issue creation is expected, not a failure.
 - Category classification (for code-review findings, and now for any genuinely-new category) is an LLM judgment call, not a deterministic lookup — expect occasional misclassification or an occasional near-duplicate category slipping through despite the reuse-check, correctable by hand in GitHub after the fact.
-- No auto-closing or auto-updating of issues when the underlying finding later resolves — v1 only creates and backfills.
+- No auto-closing or auto-updating of issues when the underlying finding later resolves — it only creates.
 - No holistic recategorization pass exists yet — if the category vocabulary does drift messy across many runs, that's currently a manual GitHub cleanup, not something this skill can fix in bulk (see the `/make-issues reorganize` note above).
 
 ## License
