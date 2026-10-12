@@ -15,7 +15,7 @@ The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 |---|-------|---------|----------|-------------------------|
 | 1 | Find the work | `/project-review` and/or `/code-review <scope>` | Findings with `file:line`, severity, effort | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
 | 2 | File the work | `/make-issues [--all]` | GitHub issues, labelled + fingerprinted | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:`/`source:` labels |
-| 3 | Decide what to work | `/issue-triage` | Disposition per issue + ordered work units | `.claude/tmp/issue-triage/ISSUE_TRIAGE.md` |
+| 3 | Decide what to work | `/fix-order` | Disposition per issue + ordered work units | `.claude/tmp/fix-order/FIX_ORDER.md` |
 | 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (one name, local and remote), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/pr-triage` | Blast-radius-ranked merge sequence | `.claude/tmp/pr-triage/PR_TRIAGE.md` |
 | 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
@@ -32,7 +32,7 @@ gh auth status                                              # stages 2-5 need th
 echo '**/.claude/tmp/' >> "$(git config --global core.excludesFile)"
 ```
 
-The second line keeps `/issue-triage` and `/pr-triage` scratch output out of every repo's
+The second line keeps `/fix-order` and `/pr-triage` scratch output out of every repo's
 `git status`. Without it each skill falls back to appending to that repo's
 `.git/info/exclude` on first run — which works, but is obscure enough to be confusing later.
 
@@ -113,45 +113,45 @@ as a *comment* (never a body edit) so those issues participate in future dedup �
 importantly, so stage 3 can see their `file:` field.
 
 **Why the fingerprint matters downstream:** the `file:` field is exactly the overlap signal
-`/issue-triage` Phase 2 needs. On a repo where every issue went through `/make-issues` or
-`backfill`, most of triage is free. On a repo of raw hand-filed issues, triage has to infer
+`/fix-order` Phase 2 needs. On a repo where every issue went through `/make-issues` or
+`backfill`, most of `/fix-order` is free. On a repo of raw hand-filed issues, `/fix-order` has to infer
 paths from prose and its grouping is correspondingly weaker.
 
 ## Stage 3 — Decide what to work
 
 ```
-/issue-triage                      # full open queue
-/issue-triage #11 #15 #18          # scoped
-/issue-triage list                 # past snapshots, live open/closed status
+/fix-order                      # full open queue
+/fix-order #11 #15 #18          # scoped
+/fix-order list                 # past snapshots, live open/closed status
 ```
 
 Output is a **disposition per issue**, not a ranking — because the two most valuable things
-triage finds can't be expressed as an order:
+`/fix-order` finds can't be expressed as an order:
 
 | Disposition | Meaning | Your move |
 |---|---|---|
 | `WORK n` | Work alone, at position n | Nothing — stage 4 handles it |
 | `GROUP` | Collides with another issue at the *symbol* level | Nothing — one branch, one PR, `Fixes #a` + `Fixes #b` |
-| `NEEDS-DECISION` | Not implementable as filed; needs a policy/domain call | **Answer the question in the issue, then re-triage** |
+| `NEEDS-DECISION` | Not implementable as filed; needs a policy/domain call | **Answer the question in the issue, then re-run `/fix-order`** |
 | `DEFER` | Speculative or future-scoped | Apply `backlog` yourself if you agree |
 | `CLOSE-MOOT` | Another issue supersedes it | Close it yourself if you agree |
 
 The bottom three are the ones that need you. `NEEDS-DECISION` in particular is the stage-3
 output to read first: leave one unanswered and stage 4 will halt on it anyway.
 
-A triage run applies nothing — it never labels, closes, or comments. Deferring and closing
+A `/fix-order` run applies nothing — it never labels, closes, or comments. Deferring and closing
 are prioritization decisions, and a skill that enacts them is making the call rather than
 surfacing it.
 
 The one exception is opt-in and separate:
 
 ```
-/issue-triage label [#11 #15]      # sync `status: needs-decision` onto GitHub
+/fix-order label [#11 #15]      # sync `status: needs-decision` onto GitHub
 ```
 
 It makes GitHub agree with the snapshot — adding the label to issues currently dispositioned
 `NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are — so the
-blocked work is visible in the UI rather than only in `.claude/tmp/`. Run it after a triage,
+blocked work is visible in the UI rather than only in `.claude/tmp/`. Run it after `/fix-order`,
 and again after answering a decision to clear the flag. Nothing downstream reads the label:
 stage 4 re-derives the disposition itself, so a stale one is cosmetic rather than a silent
 block.
@@ -167,12 +167,12 @@ block.
 Per work unit: fresh worktree under `.worktrees/`, branch off `origin/<base>`, do the change,
 push, open the PR, rename the local branch to carry the PR number, tear the worktree down.
 
-Batch mode re-runs `/issue-triage`'s Phases 2–5 **fresh** to order its queue — it never reads
+Batch mode re-runs `/fix-order`'s Phases 2–5 **fresh** to order its queue — it never reads
 a stale snapshot, since any merge or label change since invalidates one. It works units
 sequentially (parallel worktrees on overlapping code is how you manufacture the conflicts
 stage 5 then has to untangle), and it halts on `NEEDS-DECISION`.
 
-**Overlapping units are stacked, not parallelised.** `/issue-triage`'s Phase 4.5 marks a unit
+**Overlapping units are stacked, not parallelised.** `/fix-order`'s Phase 4.5 marks a unit
 `STACK` when it shares a file with one ranked ahead of it. That unit's branch is cut from its
 parent's branch and its PR targets that branch, so the change is written against code that
 already contains the parent's fix instead of against a base that predates it.
@@ -272,15 +272,15 @@ Or by hand:
 |---|---|
 | Is there a current review? | `ls -lt docs/reviews/` — compare its date against `git log -1`. `code-review_PR*.md` files are stage-6 PR reviews, not stage-1 work |
 | Were the findings filed? | `gh issue list --state all --label "source: project-review" --label "source: code-review"` |
-| Which issues are untriaged? | `/issue-triage list` — outstanding units vs. `gh issue list --state open` |
-| Is anything blocked on me? | The `NEEDS-DECISION` / `DEFER` / `CLOSE-MOOT` sections of the latest `ISSUE_TRIAGE.md` |
+| Which issues have no place in the order yet? | `/fix-order list` — outstanding units vs. `gh issue list --state open` |
+| Is anything blocked on me? | The `NEEDS-DECISION` / `DEFER` / `CLOSE-MOOT` sections of the latest `FIX_ORDER.md` |
 | What work is in flight? | `git branch -a \| grep -E 'Fix-I[0-9]+'` and `gh pr list` |
 | Is there a merge order? | `/pr-triage list` — and whether anything merged since it was generated |
 | What's finished? | `gh pr list --state merged --limit 20` |
 
 Both `list` subcommands resolve their snapshots against **live** GitHub state, so a snapshot
 whose queue has entirely resolved shows up as fully closed rather than as pending work.
-`/issue-triage clean` and `/pr-triage clean` remove exactly those.
+`/fix-order clean` and `/pr-triage clean` remove exactly those.
 
 ---
 
@@ -321,11 +321,11 @@ surface it rather than take it:
 - **Say anything on your behalf on a PR.** `/code-review <pr>` writes a local report and
   stops — no review comment, no requested changes, no approval. Publishing a review is your
   call. The pipeline's complete set of GitHub writes stays: `/make-issues` (issues and
-  fingerprint comments), `/issue-triage label` (one label, opt-in), and `/work-issue`
+  fingerprint comments), `/fix-order label` (one label, opt-in), and `/work-issue`
   (branch, PR, per-issue resolution comment).
-- **Close or defer an issue.** `/issue-triage` proposes `CLOSE-MOOT` and `DEFER`; it never
+- **Close or defer an issue.** `/fix-order` proposes `CLOSE-MOOT` and `DEFER`; it never
   applies a `backlog` label or closes anything, and `/work-issue` won't act on those
-  proposals either. `/issue-triage label` is the one sanctioned mutation, and it touches
+  proposals either. `/fix-order label` is the one sanctioned mutation, and it touches
   exactly one label after showing you both the additions and the removals.
 - **Decide a `NEEDS-DECISION` issue.** Batch mode halts instead of picking a policy and
   letting you discover it by reading a diff.

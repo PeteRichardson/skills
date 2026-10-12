@@ -26,7 +26,7 @@ Fix-I60-F3-rust-ps-path
 - `F<n>` — the finding ID from a `/project-review` or `/code-review` report, if the issue records one. Omitted entirely when it doesn't — `Fix-I63-rust-shell-quote`, no empty segment.
 - Slug — 2–4 words from the issue title, lowercased, `[a-z0-9-]` only, ≤ 32 chars.
 
-**Grouped units** — when `/issue-triage` returns a `GROUP` disposition, several issues share one branch and one PR. Every issue number appears, ascending, each with its own `I` prefix; finding IDs follow in the same order, and are omitted entirely if none of the issues has one:
+**Grouped units** — when `/fix-order` returns a `GROUP` disposition, several issues share one branch and one PR. Every issue number appears, ascending, each with its own `I` prefix; finding IDs follow in the same order, and are omitted entirely if none of the issues has one:
 
 ```
 Fix-I11-I15-sparql-retry-set
@@ -97,13 +97,13 @@ Marker fields:
 * `grouped_with:` lists the *other* issue numbers in the unit. Omitted entirely for a single-issue unit.
 * `finding:` carries the `F<n>` from Phase 1. Omitted when absent, and **never inferred** — the same rule the branch name follows.
 
-The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerprint marker owns `finding_id:`, and three protocols scan issue comments for it (this skill's Phase 1, `/issue-triage` Phase 1, `/pr-triage` Phase 3). All three anchor on the marker name `project-review-finding`, so using a different key name here means even a careless grep can't cross the two markers.
+The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerprint marker owns `finding_id:`, and three protocols scan issue comments for it (this skill's Phase 1, `/fix-order` Phase 1, `/pr-triage` Phase 3). All three anchor on the marker name `project-review-finding`, so using a different key name here means even a careless grep can't cross the two markers.
 
 ## Phase 0: Resolve the invocation
 
 * **`/work-issue <n>`** — one issue. Proceed to Phase 1.
 * **`/work-issue all`**, or any "for each open issue that isn't already addressed by a PR" phrasing — batch mode, see Batch mode below.
-* **`/work-issue <n> <m> ...`** — several issue numbers. Enter batch mode scoped to exactly those, using the `issue-triage` protocol per step 3 below. This is batch mode over a hand-picked set, not a series of independent single runs — the numbers may turn out to belong in one grouped PR.
+* **`/work-issue <n> <m> ...`** — several issue numbers. Enter batch mode scoped to exactly those, using the `fix-order` protocol per step 3 below. This is batch mode over a hand-picked set, not a series of independent single runs — the numbers may turn out to belong in one grouped PR.
 * **`/work-issue <description>`** with no issue number — stop. The branch format requires `I<n>`, and an issue is the durable record this whole flow hangs off. Offer to file the issue first (`gh issue create`, or `/make-issues` if it came from a review report), then re-invoke with the number.
 * `restack` — `/work-issue restack` (every open stacked PR whose parent has moved or merged)
   or `/work-issue restack 71 74` (scoped to those PRs). Skips Phases 1–6 entirely and runs
@@ -133,7 +133,7 @@ Run from the main repo, not from another worktree:
 
 1. `git fetch origin` and confirm the base branch (default branch unless the user says otherwise).
 2. Ensure `.worktrees/` is ignored — **without modifying any tracked file**, the same
-   convention `/pr-triage` and `/issue-triage` use for `.claude/tmp/`:
+   convention `/pr-triage` and `/fix-order` use for `.claude/tmp/`:
 
    ```bash
    git check-ignore -q .worktrees/ || cat >> .git/info/exclude <<'EOF'
@@ -347,9 +347,9 @@ For "every open issue not already addressed by a PR":
 
    Report the excluded issues by number and title. A deferred issue that silently never appears reads as "nothing left to do" when the truth is "you decided not to do these" — and a mistakenly-labelled issue would otherwise stay invisible forever.
 2. Run Phase 2's three checks per issue; report the skips as a list with the reason each fired.
-3. **Order the queue using the `issue-triage` protocol.** Read `~/.claude/skills/issue-triage/SKILL.md` and execute its Phases 2–5, including Phase 4.5, against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Do **not** try to invoke it through the Skill tool — `issue-triage` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/issue-triage` or by reading its protocol file directly, which is what this step does.
+3. **Order the queue using the `fix-order` protocol.** Read `~/.claude/skills/fix-order/SKILL.md` and execute its Phases 2–5, including Phase 4.5, against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Do **not** try to invoke it through the Skill tool — `fix-order` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/fix-order` or by reading its protocol file directly, which is what this step does.
 
-   Run it fresh every time — never read a previous `.claude/tmp/issue-triage/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
+   Run it fresh every time — never read a previous `.claude/tmp/fix-order/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
 
    | Disposition | What batch mode does |
    |---|---|
@@ -361,10 +361,10 @@ For "every open issue not already addressed by a PR":
    | `DEFER` | Report as a deferral proposal and skip. Never apply the label. |
    | `CLOSE-MOOT` | Report the proposal with its evidence and skip. Never close the issue. |
 
-   If `~/.claude/skills/issue-triage/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
+   If `~/.claude/skills/fix-order/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
 4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
 5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), branch name, comment posted y/n, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
-6. Before starting a batch of more than ~3 units, show the triage plan and confirm. Each unit
+6. Before starting a batch of more than ~3 units, show the fix-order plan and confirm. Each unit
    opens a real PR. The plan names each unit's base explicitly, so a stack is visible before
    anything is pushed:
 
@@ -375,7 +375,7 @@ For "every open issue not already addressed by a PR":
      #21  HOLD              overlaps the #11 -> #15 -> #18 chain, held to next batch
    ```
 
-   Stacking needs no flag. It is what the triage already decided; the plan is where it
+   Stacking needs no flag. It is what `/fix-order` already decided; the plan is where it
    becomes visible.
 
 ## Next in the pipeline
@@ -404,9 +404,9 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 * Never write the resolution comment as though the fix has landed. It is written before review; `**Proposed fix**`, the `> [!NOTE]` callout, and the proposal tense are not decoration.
 * One worktree per issue. If Phase 2 says the issue is already covered, stop — don't create a parallel attempt.
 * Never implement a `NEEDS-DECISION` issue by choosing the policy yourself. The whole point of the disposition is that the choice reaches the user before code exists.
-* Never act on `/issue-triage`'s `CLOSE-MOOT` or `DEFER` proposals — report them. Closing an issue or deferring one is a mutation on a judgment call; triage is advisory and so is this skill's handling of it.
+* Never act on `/fix-order`'s `CLOSE-MOOT` or `DEFER` proposals — report them. Closing an issue or deferring one is a mutation on a judgment call; `/fix-order` is advisory and so is this skill's handling of it.
 * Never work a deferred issue in batch mode, and never strip a deferral label to make an issue eligible. Deciding something is worth doing now is the user's call; the label is that decision already recorded. A single explicit `/work-issue <n>` may override it, but only after asking.
-* **`status: needs-decision` is not a deferral label.** `/issue-triage label` applies it for visibility in the GitHub UI; it is not in `DEFERRAL_LABELS` and must never be added to it. Never skip an issue for carrying it and never remove it. Batch mode derives the `NEEDS-DECISION` disposition fresh from the triage protocol on every run, which is what makes the halt correct — a label left behind after the decision was answered would otherwise block the issue silently and permanently. Read the disposition, not the label.
+* **`status: needs-decision` is not a deferral label.** `/fix-order label` applies it for visibility in the GitHub UI; it is not in `DEFERRAL_LABELS` and must never be added to it. Never skip an issue for carrying it and never remove it. Batch mode derives the `NEEDS-DECISION` disposition fresh from the fix-order protocol on every run, which is what makes the halt correct — a label left behind after the decision was answered would otherwise block the issue silently and permanently. Read the disposition, not the label.
 * Stop and report rather than guess when `gh` fails (auth, rate limit) or the issue number doesn't exist. No silent retries.
 * Never cut a `STACK` unit's branch from the base. The whole point is that it sees its
   parent's changes while the code is being written; branching from the base silently produces

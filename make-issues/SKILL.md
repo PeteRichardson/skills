@@ -124,7 +124,7 @@ source: code-review      #bfd4f2
 status: needs-decision   #d876e3
 ```
 
-`status:` is a workflow axis rather than a property of the finding, which is why it's a namespace of its own rather than another `category:`. **This skill never applies it and never creates it** — it's listed here because this file owns the label vocabulary, and `/issue-triage label` (its only writer) needs a canonical name and color to reuse instead of minting a variant. Seeding a label nothing in this run will use would leave an unused label on every repo that never triages.
+`status:` is a workflow axis rather than a property of the finding, which is why it's a namespace of its own rather than another `category:`. **This skill never applies it and never creates it** — it's listed here because this file owns the label vocabulary, and `/fix-order label` (its only writer) needs a canonical name and color to reuse instead of minting a variant. Seeding a label nothing in this run will use would leave an unused label on every repo that never runs `/fix-order label`.
 
 This is a **baseline, not a closed set** — matches `/project-review`'s own now-extensible Phase 2 vocabulary (favor reuse, allow a new category when genuinely justified). For every `category:` value a finding names, resolve it in this order before applying a label:
 
@@ -157,7 +157,7 @@ This is a **baseline, not a closed set** — matches `/project-review`'s own now
 
 A label **fills a gap**: it goes only into a namespace (`severity:`, `category:`, `effort:`) where the issue has no label yet. Labels a person already applied stay exactly as they are.
 
-1. **Scope.** Open issues only — a label on a closed issue steers no triage. An explicit `#n` list overrides this.
+1. **Scope.** Open issues only — a label on a closed issue steers no ordering. An explicit `#n` list overrides this.
 2. **Assess** a value for each empty namespace, from the issue's title, body and comments. On a hand-filed issue (no `source:` label), assess the filled namespaces too, for step 3. Decide each value from the text before you look at the issue's labels, so the current label does not anchor the result:
    - `severity:` — the Low/Medium/High/Critical scale the review tools use: the impact on the user, or on the maintainer when nothing is user-visible. A feature request takes the severity of the gap it fills (usually Low or Medium).
    - `category:` — resolve per Phase 4's three steps. Reuse the 5a category when 5a fingerprinted this issue, so the marker and the label agree. A feature request with no debt or defect in it usually has no fitting category: leave the namespace empty.
@@ -182,13 +182,13 @@ A summary is **added, never rewritten**: a person may have curated an existing o
 
 This skill is stage 2 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line:
 
-> Next: `/issue-triage` to decide what to work, in what order, and what to combine.
+> Next: `/fix-order` to decide what to work, in what order, and what to combine.
 
 Vary it only for these cases:
 
-* **A `backfill` run** — same line, but note that triage is now meaningfully cheaper on this repo: the fingerprints just written are the file-overlap signal its Phase 2 reads, and the new `severity:` labels feed its ordering.
-* **Fewer than ~3 issues created and none share a file** — say triage is optional at this size and `/work-issue <n>` directly is reasonable. Still mention it if any two do share a file; that's the case grouping exists for.
-* **Nothing was created** (everything deduped to existing issues) — recommend `/issue-triage` anyway. The queue is unchanged, not empty.
+* **A `backfill` run** — same line, but note that `/fix-order` is now meaningfully cheaper on this repo: the fingerprints just written are the file-overlap signal its Phase 2 reads, and the new `severity:` labels feed its ordering.
+* **Fewer than ~3 issues created and none share a file** — say `/fix-order` is optional at this size and `/work-issue <n>` directly is reasonable. Still mention it if any two do share a file; that's the case grouping exists for.
+* **Nothing was created** (everything deduped to existing issues) — recommend `/fix-order` anyway. The queue is unchanged, not empty.
 
 ## Rules
 

@@ -127,9 +127,9 @@ if [[ $HAS_GH -eq 1 ]]; then
   ' < "$TMP/issues" 2>/dev/null || echo 0)
 fi
 
-# ---------------------------------------------------------------- stage 3: issue-triage
+# ---------------------------------------------------------------- stage 3: fix-order
 
-IT_DIR=".claude/tmp/issue-triage"
+IT_DIR=".claude/tmp/fix-order"
 IT_FILE=$(newest "$IT_DIR/*.md")
 IT_UNITS=0; IT_DECIDE=0; IT_AGE=""
 if [[ -n $IT_FILE ]]; then
@@ -226,11 +226,11 @@ next_step() {
     echo "/make-issues  —  a review exists but no issues carry a source: label$s"; return
   fi
   if [[ $IT_DECIDE -gt 0 ]]; then
-    echo "answer the $IT_DECIDE NEEDS-DECISION issue(s) in $IT_FILE, then re-run /issue-triage"
+    echo "answer the $IT_DECIDE NEEDS-DECISION issue(s) in $IT_FILE, then re-run /fix-order"
     echo "     (/work-issue all halts on them until then)"; return
   fi
   if [[ $ISSUES_OPEN -gt 0 && -z $IT_FILE ]]; then
-    echo "/issue-triage  —  $ISSUES_OPEN open issues, never triaged"; return
+    echo "/fix-order  —  $ISSUES_OPEN open issues, never ordered"; return
   fi
   if [[ $UNSTARTED -gt 0 ]]; then
     echo "/work-issue all  —  $UNSTARTED open issue(s) with no branch or PR"; return
@@ -286,9 +286,9 @@ fi
 
 if [[ -n $IT_FILE ]]; then
   d=""; [[ $IT_DECIDE -gt 0 ]] && d="  ·  $IT_DECIDE NEEDS-DECISION  <- blocked on you"
-  row 3 triage "$(basename "$IT_FILE")  $IT_AGE  ·  $IT_UNITS units$d"
+  row 3 fix-order "$(basename "$IT_FILE")  $IT_AGE  ·  $IT_UNITS units$d"
 else
-  row 3 triage "—"
+  row 3 fix-order "—"
 fi
 
 row 4 "in flight" "$BRANCHES branches  ·  $PRS_OPEN PRs open$( [[ $PRS_CONFLICT -gt 0 ]] && echo "  ·  $PRS_CONFLICT CONFLICTING" )"

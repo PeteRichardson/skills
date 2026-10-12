@@ -7,7 +7,7 @@ disable-model-invocation: true
 # Pipeline
 
 A status skill for the six-stage workflow documented in `~/.claude/skills/WORKFLOW.md`:
-review → file → triage → work → order → merge.
+review → file → fix-order → work → pr-triage → merge.
 
 It answers one question — *what do I type next?* — and it answers it from artifacts rather
 than from anything it remembers.
@@ -26,7 +26,7 @@ never trust a previous run's conclusion — the user merges PRs, closes issues, 
 branches outside this skill constantly, and a tracker would be wrong the first time they did.
 
 **This skill runs nothing.** It names the next command; the user types it. That boundary is
-the same one `/issue-triage` and `/pr-triage` hold, and it's what keeps stage 6 — merging —
+the same one `/fix-order` and `/pr-triage` hold, and it's what keeps stage 6 — merging —
 a thing the user does by hand deliberately.
 
 **The script does the counting; you do the judgment.** `pipeline-status` (next to this file)
@@ -66,7 +66,7 @@ you did:
 ```bash
 ls -lt docs/reviews/                                       # stage 1
 gh issue list --state open --limit 300 --json number,labels # stage 2
-ls -lt .claude/tmp/issue-triage/                           # stage 3
+ls -lt .claude/tmp/fix-order/                           # stage 3
 git branch -a | grep -E 'Fix-I[0-9]+' ; gh pr list         # stage 4
 ls -lt .claude/tmp/pr-triage/                              # stage 5
 gh pr list --state merged --limit 30                       # stage 6
@@ -79,8 +79,8 @@ confirm counts the script already produced.
 
 | Dashboard shows | Read this | Report |
 |---|---|---|
-| `N NEEDS-DECISION` | The `Decisions needed` section of the newest `.claude/tmp/issue-triage/*.md` | The actual question and the options the issue named — answerable without opening GitHub. Mention `/issue-triage label` if the issues don't already carry `status: needs-decision`, but never run it: it mutates GitHub |
-| A triage snapshot exists | Its `Proposed deferrals` / `Proposed closures` sections | Standing proposals, flagged as awaiting the user's call. Never as blockers |
+| `N NEEDS-DECISION` | The `Decisions needed` section of the newest `.claude/tmp/fix-order/*.md` | The actual question and the options the issue named — answerable without opening GitHub. Mention `/fix-order label` if the issues don't already carry `status: needs-decision`, but never run it: it mutates GitHub |
+| A fix-order snapshot exists | Its `Proposed deferrals` / `Proposed closures` sections | Standing proposals, flagged as awaiting the user's call. Never as blockers |
 | `N CONFLICTING` PRs | `gh pr list --json number,title,mergeable` | Which PRs need author action regardless of queue position |
 | A merge order exists | The `Overlap detail` section of the newest `.claude/tmp/pr-triage/*.md` | Any **likely semantic collision** pairs — the ones where a careless rebase merges cleanly and is still wrong |
 | `[stale]` on the merge order | Nothing extra | That the order must be re-run before working down it |
@@ -97,8 +97,8 @@ and add the one-sentence reason only if it isn't obvious from the dashboard.
 
 Override the script's cascade in exactly these cases, and say why when you do:
 
-* **It recommends `/work-issue all` but the triage snapshot is older than the newest issue
-  update** — recommend re-running `/issue-triage` first. Its ordering is computed against a
+* **It recommends `/work-issue all` but the fix-order snapshot is older than the newest issue
+  update** — recommend re-running `/fix-order` first. Its ordering is computed against a
   queue that has since changed.
 * **It recommends `/make-issues` but no review report is fresh enough to file from** — the
   script only checks `PROJECT_REVIEW.md`'s commit drift. If the only report is a
@@ -172,13 +172,13 @@ alias ps6n='~/.claude/skills/pipeline/pipeline-status -b'
 
   1 review      PROJECT_REVIEW.md  41m ago  ·  1 commits since  [stale]
   2 issues      34 open  ·  34 from a review report
-  3 triage      ISSUE_TRIAGE.md  14m ago  ·  18 units  ·  2 NEEDS-DECISION  <- blocked on you
+  3 fix-order   FIX_ORDER.md  14m ago  ·  18 units  ·  2 NEEDS-DECISION  <- blocked on you
   4 in flight   1 branches  ·  0 PRs open
   5 merge order —
   6 merged      5 PRs (last 30)
 
-  next: answer the 2 NEEDS-DECISION issue(s) in .claude/tmp/issue-triage/ISSUE_TRIAGE.md,
-        then re-run /issue-triage
+  next: answer the 2 NEEDS-DECISION issue(s) in .claude/tmp/fix-order/FIX_ORDER.md,
+        then re-run /fix-order
 ```
 
 Run the script when you want the shape; run the skill when you want the shape plus what the
@@ -193,7 +193,7 @@ record — `docs/reviews/` for stage 1, `source:` labels and fingerprint markers
 for stage 6 — and unlike a tracker they're written by the stages themselves, so they can't
 disagree with reality.
 
-This is the same reasoning behind `/issue-triage list` and `/pr-triage list` resolving their
+This is the same reasoning behind `/fix-order list` and `/pr-triage list` resolving their
 snapshots against live GitHub state rather than trusting what the snapshot recorded.
 
 ## Why the detection lives in a script, not in the skill
@@ -210,7 +210,7 @@ report's staleness matters.
 
 ## Why this skill is user-invoked only
 
-`disable-model-invocation: true`, matching `/issue-triage` and `/pr-triage`.
+`disable-model-invocation: true`, matching `/fix-order` and `/pr-triage`.
 
 The specific reason is a trigger collision: `/project-review`'s description already claims
 "what should I work on next" and "what needs to be done in this repo" as conversational

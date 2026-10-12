@@ -81,7 +81,7 @@ unstacked PR: no parent constraint, no blast-radius correction. Then, for every 
 (unresolved) marker:
 
 1. **A chain sorts as one block.** A child never ranks above its parent — this is a hard
-   constraint like `DEPENDS-ON` is in `/issue-triage` Phase 4, and the ascending blast-radius
+   constraint like `DEPENDS-ON` is in `/fix-order` Phase 4, and the ascending blast-radius
    sort has no way to know about it on its own, so it needs an explicit rule to satisfy it: a
    chain (the parent plus every descendant stacked on it, directly or transitively) moves as
    one block, positioned at its root's — the parent's — blast-radius rank, then unpacks

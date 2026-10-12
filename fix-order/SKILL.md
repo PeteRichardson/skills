@@ -1,24 +1,24 @@
 ---
-name: issue-triage
-description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/issue-triage/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue (including stacked and held units), and an ordered work plan. Supports `/issue-triage list`, `/issue-triage open`, `/issue-triage clean` [--all], and `/issue-triage label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 2-5, including Phase 4.5, are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to triage the issue queue. A triage run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
+name: fix-order
+description: Assess a set of open GitHub issues and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Produces a scoped snapshot under .claude/tmp/fix-order/ with a relationship graph (file/symbol overlap, declared dependencies, supersession), a disposition per issue (including stacked and held units), and an ordered work plan. Supports `/fix-order list`, `/fix-order open`, `/fix-order clean` [--all], and `/fix-order label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 2-5, including Phase 4.5, are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to prioritize the issue queue. A fix-order run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
 disable-model-invocation: true
 ---
 
-# Issue Triage
+# Fix Order
 
 A Claude Code skill that looks at a set of open issues and recommends a **fix plan** — not merely an order. Some issues shouldn't be worked at all because another issue moots them; some shouldn't be worked *separately* because they rewrite the same function; some can't be worked yet because they need a decision only the maintainer can make.
 
-When invoked via `/issue-triage`, follow the protocol below. Everything from here through the `---` divider is the protocol Claude executes. The section after the divider is documentation for humans installing or maintaining this skill.
+When invoked via `/fix-order`, follow the protocol below. Everything from here through the `---` divider is the protocol Claude executes. The section after the divider is documentation for humans installing or maintaining this skill.
 
 ---
 
 ## Operating principles
 
-**The output is a disposition per issue, not a ranking.** A linear order cannot express "don't work this one at all" or "work these two as one change," which are the two highest-value things triage produces. Ranking is the last step, applied only to what survives.
+**The output is a disposition per issue, not a ranking.** A linear order cannot express "don't work this one at all" or "work these two as one change," which are the two highest-value things this skill produces. Ranking is the last step, applied only to what survives.
 
-**A triage run is advisory.** It never creates, closes, labels, comments on, or edits an issue; never creates a branch, worktree, or PR. It reads (`gh issue list`, `gh issue view`, `git log`, source files) and writes under `.claude/tmp/issue-triage/`. Every disposition is a recommendation the user or `/work-issue` acts on — in particular `CLOSE-MOOT` and `DEFER` are proposals requiring confirmation, never actions.
+**A fix-order run is advisory.** It never creates, closes, labels, comments on, or edits an issue; never creates a branch, worktree, or PR. It reads (`gh issue list`, `gh issue view`, `git log`, source files) and writes under `.claude/tmp/fix-order/`. Every disposition is a recommendation the user or `/work-issue` acts on — in particular `CLOSE-MOOT` and `DEFER` are proposals requiring confirmation, never actions.
 
-The single exception is the **`label` subcommand**, which the user invokes separately and which syncs exactly one label (`status: needs-decision`) after showing what it will change. Running a triage never applies it; typing `/issue-triage label` does.
+The single exception is the **`label` subcommand**, which the user invokes separately and which syncs exactly one label (`status: needs-decision`) after showing what it will change. A fix-order run never applies it; typing `/fix-order label` does.
 
 **Deferral is the maintainer's call, not this skill's.** Proposing that an issue be deferred is useful; applying a `backlog` label is a priority decision belonging to the user. This skill proposes; it never applies a deferral label, and `label` won't either — see "Why `status: needs-decision` is labelled but `backlog` isn't" below for why those two aren't the same act.
 
@@ -28,12 +28,12 @@ The single exception is the **`label` subcommand**, which the user invokes separ
 
 Check the invocation before doing anything else:
 
-* **`/issue-triage list`** — for every file in `.claude/tmp/issue-triage/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`units`, `generated`) rather than the full report. Then make **one** `gh issue list --state all --json number,state,title,url,closedAt` call covering the union of every issue number across all files, and classify each file's issues against that single result — don't make a separate API call per file.
+* **`/fix-order list`** — for every file in `.claude/tmp/fix-order/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`units`, `generated`) rather than the full report. Then make **one** `gh issue list --state all --json number,state,title,url,closedAt` call covering the union of every issue number across all files, and classify each file's issues against that single result — don't make a separate API call per file.
 
   For each file, print the filename, its `generated` timestamp, and its resolved absolute path on one line, then two groups below it:
 
   ```
-  ISSUE_TRIAGE.md  (generated 2026-07-26 15:04)  /Users/pete/project/.claude/tmp/issue-triage/ISSUE_TRIAGE.md
+  FIX_ORDER.md  (generated 2026-07-26 15:04)  /Users/pete/project/.claude/tmp/fix-order/FIX_ORDER.md
       1  #18, #19  ‼ set_field: precedence + agreement      https://github.com/org/repo/issues/18
       2  #11, #15    SPARQL retry set + Retry-After         https://github.com/org/repo/issues/11
       ?  #12         Rating priority (NEEDS-DECISION)       https://github.com/org/repo/issues/12
@@ -46,13 +46,13 @@ Check the invocation before doing anything else:
   - **Closed**: one line per issue, newest `closedAt` first, ending with `closed <date>`.
   - Each line ends with the issue's plain `url` from the live result — plain text, not a rendered hyperlink.
 
-  Sort files newest-generated first (from frontmatter `generated`, not file mtime). Stop here; don't run a triage.
-* **`/issue-triage open`** — run `open .claude/tmp/issue-triage/` (macOS). If `open` isn't available, print the absolute path. Stop here.
-* **`/issue-triage clean`** — read every file's frontmatter issue numbers, make one `gh issue list --state all --json number,state` call covering the union. Any file whose entire issue set is now closed is a removal candidate. Show candidates plus what's being kept and why, and ask for confirmation before deleting. Stop here.
-* **`/issue-triage clean --all`** — unconditional wipe of `.claude/tmp/issue-triage/`. Show what will be deleted, ask for confirmation. Stop here.
-* **`/issue-triage label`**, or **`/issue-triage label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run a triage.
-* **`/issue-triage`** (no args) — full-queue run, proceed to Phase 1.
-* **`/issue-triage #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
+  Sort files newest-generated first (from frontmatter `generated`, not file mtime). Stop here; don't run the ranking.
+* **`/fix-order open`** — run `open .claude/tmp/fix-order/` (macOS). If `open` isn't available, print the absolute path. Stop here.
+* **`/fix-order clean`** — read every file's frontmatter issue numbers, make one `gh issue list --state all --json number,state` call covering the union. Any file whose entire issue set is now closed is a removal candidate. Show candidates plus what's being kept and why, and ask for confirmation before deleting. Stop here.
+* **`/fix-order clean --all`** — unconditional wipe of `.claude/tmp/fix-order/`. Show what will be deleted, ask for confirmation. Stop here.
+* **`/fix-order label`**, or **`/fix-order label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run the ranking.
+* **`/fix-order`** (no args) — full-queue run, proceed to Phase 1.
+* **`/fix-order #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
 * **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 2–5, including Phase 4.5, directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 2, and still write the snapshot.
 
 ## Phase 1: Enumerate the eligible set
@@ -144,13 +144,13 @@ it. That cost grows with depth; the benefit doesn't.
 
 This project uses `.claude/tmp/` as the shared convention for ephemeral skill output, namespaced per-skill. Before writing anything:
 
-1. `mkdir -p .claude/tmp/issue-triage`
+1. `mkdir -p .claude/tmp/fix-order`
 2. Ensure `.claude/tmp/` is ignored — **without modifying any tracked file**:
 
    ```bash
    git check-ignore -q .claude/tmp/ || cat >> .git/info/exclude <<'EOF'
 
-   # Added by the Claude Code /issue-triage skill.
+   # Added by the Claude Code /fix-order skill.
    # Ephemeral skill output. Excluded here rather than in .gitignore so it never
    # creates a commit diff. `git check-ignore -v <path>` will name this file as
    # the source. Delete this block to un-ignore.
@@ -165,9 +165,9 @@ This project uses `.claude/tmp/` as the shared convention for ephemeral skill ou
    **When the fallback actually fires, say so once in the run output** — name the file written and mention that `git check-ignore -v .claude/tmp/` explains the exclusion later. `.git/info/exclude` is an obscure corner of git, and a file that's silently ignored with nothing in either `.gitignore` to explain it is a genuinely confusing thing to hand someone.
 
    One directory-level entry covers every skill adopting the convention — never add per-skill entries.
-3. Filename: `ISSUE_TRIAGE.md` for a full run, or `ISSUE_TRIAGE-<numbers>.md` (issue numbers ascending) for a scoped run.
+3. Filename: `FIX_ORDER.md` for a full run, or `FIX_ORDER-<numbers>.md` (issue numbers ascending) for a scoped run.
 
-Write `.claude/tmp/issue-triage/<filename>` with YAML frontmatter so `list` can report status without parsing the body:
+Write `.claude/tmp/fix-order/<filename>` with YAML frontmatter so `list` can report status without parsing the body:
 
 ```yaml
 ---
@@ -254,19 +254,19 @@ Then the body:
 
 Puts `status: needs-decision` on the issues this queue is blocked on, so they're filterable in the GitHub UI instead of only visible in a snapshot under `.claude/tmp/`. It is a **sync**, not an apply — it removes the label as readily as it adds it, because a label left behind after a decision was answered is worse than no label at all.
 
-1. **Resolve the snapshot**, don't generate one. `/issue-triage label` → `ISSUE_TRIAGE.md`; `/issue-triage label #11 #15` → `ISSUE_TRIAGE-11-15.md`. Missing → say so, tell the user to run the triage first, and stop. **Never run a triage implicitly here.** A sync against dispositions the user hasn't read is a mutation they didn't agree to.
-2. **Staleness check.** `gh issue list --state all --json number,state,title,updatedAt` over the snapshot's issue numbers. Warn — once, listing them — about any issue whose `updatedAt` is later than the snapshot's `generated` timestamp, or that has closed since. Offer re-running the triage first. Advisory, not blocking; the user may know the update was cosmetic.
+1. **Resolve the snapshot**, don't generate one. `/fix-order label` → `FIX_ORDER.md`; `/fix-order label #11 #15` → `FIX_ORDER-11-15.md`. Missing → say so, tell the user to run `/fix-order` first, and stop. **Never run the ranking implicitly here.** A sync against dispositions the user hasn't read is a mutation they didn't agree to.
+2. **Staleness check.** `gh issue list --state all --json number,state,title,updatedAt` over the snapshot's issue numbers. Warn — once, listing them — about any issue whose `updatedAt` is later than the snapshot's `generated` timestamp, or that has closed since. Offer re-running `/fix-order` first. Advisory, not blocking; the user may know the update was cosmetic.
 3. **Compute two sets, scoped strictly to issue numbers present in this snapshot's `units`:**
    - **Add** — issues in a unit whose `disposition` is `NEEDS-DECISION`, that don't already carry the label.
    - **Remove** — issues in this snapshot carrying the label whose disposition is now anything else.
 
    Issues absent from the snapshot are never touched, **even if they carry the label**. A scoped run covers three issues; it has no basis for an opinion about the other thirty, and stripping a label off an issue it never looked at is the failure this scoping rule exists to prevent.
-4. **Ensure the label exists** — `gh label list`; if absent, `gh label create "status: needs-decision" --color "d876e3" --description "Blocked on a maintainer decision (from /issue-triage)"`. This is the `status:` namespace in `/make-issues`' vendored label baseline; reuse its exact name and color rather than minting a variant.
+4. **Ensure the label exists** — `gh label list`; if absent, `gh label create "status: needs-decision" --color "d876e3" --description "Blocked on a maintainer decision (from /fix-order)"`. This is the `status:` namespace in `/make-issues`' vendored label baseline; reuse its exact name and color rather than minting a variant.
 5. **Show both lists and confirm** — issue number and title per line, adds and removals grouped separately, with the removals explained (decision answered, disposition changed, issue closed). Ask before touching anything, **even when one list is empty**. Skipping the prompt because "it's only two labels" is how a sync becomes a surprise.
 6. **Apply** — `gh issue edit <n> --add-label "status: needs-decision"` / `gh issue edit <n> --remove-label "status: needs-decision"`.
 7. **Report** what changed. If both sets were empty, say the labels already match the snapshot rather than printing nothing.
 
-This label is for humans reading GitHub. Nothing in this ecosystem reads it back: `/work-issue` re-derives `NEEDS-DECISION` from the triage protocol on every batch run precisely so a stale label can't silently block work. Recorded and displayed, never matched on — the same treatment `/make-issues` gives `finding_id`.
+This label is for humans reading GitHub. Nothing in this ecosystem reads it back: `/work-issue` re-derives `NEEDS-DECISION` from the fix-order protocol on every batch run precisely so a stale label can't silently block work. Recorded and displayed, never matched on — the same treatment `/make-issues` gives `finding_id`.
 
 ## Next in the pipeline
 
@@ -274,7 +274,7 @@ This skill is stage 3 of the review → issue → PR → merge pipeline (`~/.cla
 
 1. **Any `NEEDS-DECISION`** — that's the next step, not `/work-issue`. Name the issue numbers and say a batch run will halt on them anyway:
 
-   > Next: answer the decision on #12 (in the issue), then re-run `/issue-triage`. `/work-issue all` halts on it until then — or `/issue-triage label` first, to flag it in the GitHub UI.
+   > Next: answer the decision on #12 (in the issue), then re-run `/fix-order`. `/work-issue all` halts on it until then — or `/fix-order label` first, to flag it in the GitHub UI.
 2. **Otherwise** — the work:
 
    > Next: `/work-issue all` to work these in order, or `/work-issue 18 15` to take just the first units.
@@ -288,9 +288,9 @@ This skill never runs the next step itself; it prints the command and stops.
 
 ## Rules
 
-* Never create, close, comment on, or edit an issue. Never edit an issue body. Never create a branch, worktree, or PR. Apart from the `label` subcommand, this skill only reads and writes under `.claude/tmp/issue-triage/`.
+* Never create, close, comment on, or edit an issue. Never edit an issue body. Never create a branch, worktree, or PR. Apart from the `label` subcommand, this skill only reads and writes under `.claude/tmp/fix-order/`.
 * `label` may add and remove exactly one label, `status: needs-decision`, only within the resolved snapshot's scope, and only after showing both lists and getting confirmation. Never touch any other label — `backlog` and every other deferral label stay the user's to apply.
-* Never run a triage as a side effect of `label`. A missing snapshot is a stop-and-report, not a prompt to generate one.
+* Never run the ranking as a side effect of `label`. A missing snapshot is a stop-and-report, not a prompt to generate one.
 * `clean` and `clean --all` are the only operations that delete anything; both require showing candidates and getting explicit confirmation.
 * Base `COLLIDES` claims on actually reading the source, not on file paths alone. `OVERLAPS` is cheap and mechanical; `COLLIDES` is not, and asserting it without opening the code is the main way this skill can produce a wrong grouping.
 * Label `MOOTS` and semantic `DEPENDS-ON` as judgment calls. "Likely moots" and "moots" are different claims — don't collapse them. When in doubt, leave the issue as `WORK` and raise it in Open questions; a wrongly-closed issue costs more than a redundant PR.
@@ -301,7 +301,7 @@ This skill never runs the next step itself; it prints the command and stops.
 
 ## Repeat-run mode
 
-If a file matching the current scope already exists, read it first. Mark issues no longer open as `CLOSED`, re-triage the remainder, and note which dispositions changed since the last run and why (usually: an issue was fixed, a decision was made, or a label changed).
+If a file matching the current scope already exists, read it first. Mark issues no longer open as `CLOSED`, re-rank the remainder, and note which dispositions changed since the last run and why (usually: an issue was fixed, a decision was made, or a label changed).
 
 **Full-queue repeat runs** always re-run Phase 1 in full — a high-severity issue filed since the last run must not stay invisible. For an issue already in `units` whose live `updatedAt` is not later than the file's `generated` timestamp, reuse its recorded fingerprint data, edges, and disposition verbatim rather than recomputing. One exception: if a newly-processed issue's Phase 2 analysis produces an edge touching a skipped issue, that edge is new information — update the skipped issue's entry, and re-check whether its disposition should change (a new `COLLIDES` edge can turn a `WORK` into a `GROUP`).
 
@@ -311,15 +311,15 @@ If a file matching the current scope already exists, read it first. Mark issues 
 
 # Project documentation
 
-Everything below is for humans installing, using, or contributing to this skill. It is not part of the triage protocol.
+Everything below is for humans installing, using, or contributing to this skill. It is not part of the fix-order protocol.
 
 ## Installation
 
 Personal install (available across all your projects):
 
 ```bash
-mkdir -p ~/.claude/skills/issue-triage
-# copy this file to ~/.claude/skills/issue-triage/SKILL.md
+mkdir -p ~/.claude/skills/fix-order
+# copy this file to ~/.claude/skills/fix-order/SKILL.md
 ```
 
 Requires the `gh` CLI, authenticated (`gh auth status`) with read access to the target repo.
@@ -327,17 +327,17 @@ Requires the `gh` CLI, authenticated (`gh auth status`) with read access to the 
 ## Usage
 
 ```
-/issue-triage                  # full open queue
-/issue-triage #11 #15 #18      # scoped to a subset
-/issue-triage list             # past snapshots at a glance
-/issue-triage open             # open the snapshot folder (macOS)
-/issue-triage clean [--all]    # tidy up old snapshots
-/issue-triage label [#11 #15]  # sync `status: needs-decision` onto GitHub
+/fix-order                  # full open queue
+/fix-order #11 #15 #18      # scoped to a subset
+/fix-order list             # past snapshots at a glance
+/fix-order open             # open the snapshot folder (macOS)
+/fix-order clean [--all]    # tidy up old snapshots
+/fix-order label [#11 #15]  # sync `status: needs-decision` onto GitHub
 ```
 
-`label` is the only one that writes to GitHub. It reads the newest snapshot for the given scope and makes GitHub agree with it — adding the label to issues currently dispositioned `NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are. Run it after a triage to make the blocked issues visible in the UI, and again after answering a decision to clear the flag.
+`label` is the only one that writes to GitHub. It reads the newest snapshot for the given scope and makes GitHub agree with it — adding the label to issues currently dispositioned `NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are. Run it after `/fix-order` to make the blocked issues visible in the UI, and again after answering a decision to clear the flag.
 
-Output goes to `.claude/tmp/issue-triage/ISSUE_TRIAGE.md`, the shared per-skill scratch convention. It persists between sessions so repeat runs can report what changed, and never enters version control.
+Output goes to `.claude/tmp/fix-order/FIX_ORDER.md`, the shared per-skill scratch convention. It persists between sessions so repeat runs can report what changed, and never enters version control.
 
 **Recommended one-time setup** — add this to your global excludes file so no repo ever needs seeding:
 
@@ -349,13 +349,13 @@ Without it, the skill falls back to appending to `.git/info/exclude` on first ru
 
 ## Why a disposition per issue instead of a ranked list
 
-The original framing of this skill was "recommend a fix order." That framing can't express the two most valuable things triage finds.
+A plain ranked list of fixes can't express the two most valuable things this skill finds.
 
 The first is **an issue that shouldn't be worked at all** — if fixing B makes A moot, A's correct position in the order is "nowhere," and the correct action is to close it with a comment. A ranking has no way to say that.
 
 The second is **two issues that shouldn't be worked separately**. When two issues rewrite the same function, working them as consecutive items in an order is actively worse than working them together: each branch is cut from `main`, so the second PR conflicts with the first by construction, and if one issue's fix is only well-defined given the other's design decision, the first PR embodies a decision the second one then has to revisit. Grouping collapses both problems.
 
-Ordering is real, but it's the last and least interesting step — applied only to what survives triage.
+Ordering is real, but it's the last and least interesting step — applied only to what survives the dispositions.
 
 ## Why `NEEDS-DECISION` exists
 
@@ -377,7 +377,7 @@ They look like the same act — a skill putting a label on an issue — and they
 
 Two guardrails keep the distinction from eroding. It's synced rather than applied — the subcommand removes the label as readily as it adds it, so it can't rot into a claim nobody has re-checked. And nothing downstream reads it, so a stale one is a cosmetic problem rather than something that silently blocks `/work-issue`.
 
-The reason it's a separate subcommand rather than a step at the end of a triage run is removal, not permission. Applying it mid-run would mean every triage invocation mutates GitHub in both directions, which turns the advisory skill into a writing one for a benefit the user can get by typing six more characters.
+The reason it's a separate subcommand rather than a step at the end of a fix-order run is removal, not permission. Applying it mid-run would mean every fix-order invocation mutates GitHub in both directions, which turns the advisory skill into a writing one for a benefit the user can get by typing six more characters.
 
 ## How this fits with your other skills
 
@@ -385,7 +385,7 @@ The intended loop:
 
 1. `/project-review` or `/code-review` — find the work
 2. `/make-issues` (or `backfill`) — file it, with labels and fingerprints
-3. `/issue-triage` — decide what to work, in what order, what to combine, what to drop
+3. `/fix-order` — decide what to work, in what order, what to combine, what to drop
 4. `/work-issue all` — execute the plan (it runs this skill's Phases 2–5, including Phase 4.5, as a sub-protocol to order its queue)
 5. `/pr-triage` — order the resulting PR queue
 6. Merge manually in the recommended order
