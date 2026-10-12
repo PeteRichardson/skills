@@ -94,11 +94,12 @@ fi
 # ---------------------------------------------------------------- stage 1: reviews
 
 PR_REVIEW="docs/reviews/PROJECT_REVIEW.md"
-# PR-mode reports (code-review_PR68_*.md) are excluded: they review an unmerged branch
+# PR-mode and change-mode reports (code-review_PR68_*.md, code-review_CHANGE-*.md) are
+# excluded: they review an unmerged branch
 # at stage 6, not this repo's code at stage 1. Counting one as "there is a current
 # review" would report the work as found when nothing has been reviewed on HEAD at all.
 CR_REVIEW=$(ls -t docs/reviews/code-review_*.md 2>/dev/null \
-            | grep -v '/code-review_PR[0-9]\{1,\}_' | head -1)
+            | grep -v -e '/code-review_PR[0-9]\{1,\}_' -e '/code-review_CHANGE-' | head -1)
 REVIEW_LINES=()
 REVIEW_STALE=0
 REVIEW_BEHIND=0

@@ -78,11 +78,19 @@ Two different tools, and they compose rather than compete:
   HIGH/IDIOM/MEDIUM/LOW, ~10 findings, ordinals instead of stable IDs, no effort estimate.
   Report goes to `docs/reviews/code-review_<scope>_<date>.md`.
 
-`/code-review` also takes a PR number, but **that is stage 6, not stage 1** — it reviews a
-proposed change rather than the repo, and its report carries a `pr:` frontmatter key marking
-it as describing code that hasn't merged. `/project-review`'s Phase 1.5 and `pipeline-status`
-both skip PR reports for that reason, so running one never makes it look like this round's
-work has been found.
+`/code-review` also takes a PR number, or no argument (the changes on the current branch),
+but **those are stage 6, not stage 1** — they review a proposed change rather than the repo,
+and the report carries a `pr:` or `change:` frontmatter key marking it as describing code that
+hasn't merged. `/project-review`'s Phase 1.5 and `pipeline-status` both skip those reports for
+that reason, so running one never makes it look like this round's work has been found. Matt
+Pocock's `/implement` and `/implement-spec` end with "run /code-review"; that runs this
+skill in change mode.
+
+`/code-review` runs one **engine** and always writes the same report format:
+`open-code-review-delegate` (`ocr`, the default for a PR or a change), its own protocol
+(`native`, the default for a scope — `ocr` reviews only diffs), or
+`mattpocock-skills:code-review` (`matt`, its Standards + Spec check, with an **Axis:** line on
+each finding). Choose with `--engine`.
 
 Run `/code-review` first if you want the detail to feed the audit — `/project-review`'s
 Phase 1.5 ingests existing code-review reports as evidence. Run it after, scoped to a
@@ -285,7 +293,7 @@ Or by hand:
 
 | Question | Check |
 |---|---|
-| Is there a current review? | `ls -lt docs/reviews/` — compare its date against `git log -1`. `code-review_PR*.md` files are stage-6 PR reviews, not stage-1 work |
+| Is there a current review? | `ls -lt docs/reviews/` — compare its date against `git log -1`. `code-review_PR*.md` and `code-review_CHANGE-*.md` files are stage-6 reviews of unmerged code, not stage-1 work |
 | Were the findings filed? | `gh issue list --state all --label "source: project-review" --label "source: code-review"` |
 | Which issues have no place in the order yet? | `/fix-order list` — outstanding units vs. `gh issue list --state open` |
 | Is anything blocked on me? | The `NEEDS-DECISION` / `DEFER` / `CLOSE-MOOT` sections of the latest `FIX_ORDER.md` |

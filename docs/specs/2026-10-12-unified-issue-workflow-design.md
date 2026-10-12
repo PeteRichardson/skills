@@ -1,6 +1,6 @@
 # Unified issue workflow — design
 
-Status: steps 1–3 implemented (see "Implementation order"); steps 4–7 not yet. Touches `/issue-triage`, `/make-issues`,
+Status: steps 1–4 implemented (see "Implementation order"); steps 5–7 not yet. Touches `/issue-triage`, `/make-issues`,
 `/work-issue`, `/code-review`, `/pr-triage`, `/pipeline` (and `pipeline-status`),
 `WORKFLOW.md`, and this repo's `AGENTS.md`. Adds `/fix-order`. Renames `/pr-triage` to
 `/merge-order`.
@@ -301,13 +301,25 @@ Each step is one PR in this repo, and leaves the workflow usable.
 
 ## Open questions
 
-- **Q1.** `open-code-review-delegate` output to the fixed report format: does the wrapper
-  convert its output, or does it give the engine the format as an instruction? Needs a look at
-  what the engine writes.
 - **Q6.** After the verification trial: should any path verify by default (hand-filed
   issues, `/work-issue` before it codes)?
 
 ### Answered
+
+- **Q1.** The wrapper converts. `open-code-review-delegate` writes no report: the host agent
+  runs its Steps 1–5 and gets a list of comments (`path`, `content`, `start_line`, `severity`,
+  `category`). The wrapper turns every engine's output into one raw-finding list, then applies
+  its own tiers, scores and reporting rule. Settled in step 4:
+  - `ocr` reviews only diffs, so it is the default for a PR or a change; `native` stays the
+    default for a scope (a folder, file or glob).
+  - New **change mode**: `/code-review` with no argument (the branch since its merge base, or
+    the uncommitted changes on the default branch) and `--since <ref>`. Matt's `/implement` and
+    `/implement-spec` call `/code-review` with no argument, so this is the mode they get. Its
+    report carries a `change:` key and a `code-review_CHANGE-*` name, and `/project-review`
+    and `pipeline-status` skip it, as they skip PR reports.
+  - `matt` findings are tiered like any other, with an `**Axis:** Standards|Spec` line on each
+    (the user's choice over keeping the axes unranked). `matt` reviews only checked-out code,
+    so it does not take a PR target or uncommitted changes.
 
 - **Q2.** `/make-issues` calls `/issue-triage`. Verification is opt-in only
   (`/issue-triage --verify`), as a trial. No path verifies by default (D2).
