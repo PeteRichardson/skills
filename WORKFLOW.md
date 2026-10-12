@@ -116,9 +116,10 @@ more importantly, so stage 3 can see its `file:` field. `/issue-triage --verify`
 reproduces each issue once and records the steps in it (opt-in).
 
 **Why the fingerprint matters downstream:** the `file:` field is exactly the overlap signal
-`/fix-order` Phase 2 needs. On a repo where every issue went through `/make-issues` or
-`/issue-triage`, most of `/fix-order` is free. On a repo of raw hand-filed issues, `/fix-order` has to infer
-paths from prose and its grouping is correspondingly weaker.
+`/fix-order` Phase 2 needs. On a repo where every issue went through `/issue-triage`, most
+of `/fix-order` is free. `/fix-order` does not guess for an issue without a fingerprint or
+without `severity:` and `effort:` labels: it ranks it last and says "run `/issue-triage`
+first".
 
 ## Stage 3 — Decide what to work
 
@@ -128,6 +129,14 @@ paths from prose and its grouping is correspondingly weaker.
 /fix-order list                 # past snapshots, live open/closed status
 ```
 
+`/fix-order` needs only the open issues and the open PRs — no review report. It puts open
+PRs in the same graph as the issues: a PR is an issue with a known fix. An issue that shares
+a file with an open PR stacks on that PR's branch; one that changes the same function waits
+(`HOLD`) until the PR merges. The order is dependency, then severity, then **blast radius**
+(how many other open issues and PRs share its files — fewer goes first), then effort. A
+`/issue-triage --verify` result counts too: `already-fixed` is proposed for closure, and
+`not-enough-detail` or `not-reproduced` needs your decision.
+
 Output is a **disposition per issue**, not a ranking — because the two most valuable things
 `/fix-order` finds can't be expressed as an order:
 
@@ -135,9 +144,11 @@ Output is a **disposition per issue**, not a ranking — because the two most va
 |---|---|---|
 | `WORK n` | Work alone, at position n | Nothing — stage 4 handles it |
 | `GROUP` | Collides with another issue at the *symbol* level | Nothing — one branch, one PR, `Fixes #a` + `Fixes #b` |
-| `NEEDS-DECISION` | Not implementable as filed; needs a policy/domain call | **Answer the question in the issue, then re-run `/fix-order`** |
+| `STACK` | Shares a file with an earlier unit or an open PR | Nothing — branched from that branch; merges after it |
+| `HOLD` | Chain depth cap, or waits for an open PR to merge | Nothing — it comes back in the next batch |
+| `NEEDS-DECISION` | Not implementable as filed; needs a policy/domain call (or verification could not confirm it) | **Answer the question in the issue, then re-run `/fix-order`** |
 | `DEFER` | Speculative or future-scoped | Apply `backlog` yourself if you agree |
-| `CLOSE-MOOT` | Another issue supersedes it | Close it yourself if you agree |
+| `CLOSE-MOOT` | Another issue or an open PR supersedes it, or verification found it already fixed | Close it yourself if you agree |
 
 The bottom three are the ones that need you. `NEEDS-DECISION` in particular is the stage-3
 output to read first: leave one unanswered and stage 4 will halt on it anyway.
@@ -168,9 +179,10 @@ block.
 ```
 
 Per work unit: fresh worktree under `.worktrees/`, branch off `origin/<base>`, do the change,
-push, open the PR, rename the local branch to carry the PR number, tear the worktree down.
+push, open the PR, tear the worktree down. When `/issue-triage --verify` recorded **Steps to
+reproduce** in the issue, they become the first failing test.
 
-Batch mode re-runs `/fix-order`'s Phases 2–5 **fresh** to order its queue — it never reads
+Batch mode re-runs `/fix-order`'s Phases 1.5–5 **fresh** to order its queue — it never reads
 a stale snapshot, since any merge or label change since invalidates one. It works units
 sequentially (parallel worktrees on overlapping code is how you manufacture the conflicts
 stage 5 then has to untangle), and it halts on `NEEDS-DECISION`.

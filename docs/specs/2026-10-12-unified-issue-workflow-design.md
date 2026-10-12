@@ -1,6 +1,6 @@
 # Unified issue workflow — design
 
-Status: designed, not yet implemented. Touches `/issue-triage`, `/make-issues`,
+Status: steps 1–3 implemented (see "Implementation order"); steps 4–7 not yet. Touches `/issue-triage`, `/make-issues`,
 `/work-issue`, `/code-review`, `/pr-triage`, `/pipeline` (and `pipeline-status`),
 `WORKFLOW.md`, and this repo's `AGENTS.md`. Adds `/fix-order`. Renames `/pr-triage` to
 `/merge-order`.
@@ -223,6 +223,24 @@ order, stacks), with these changes:
 - Output: `.claude/tmp/fix-order/FIX_ORDER.md`. It is temporary and made again on each run.
 
 `/work-issue` batch mode reads `/fix-order`'s protocol where it now reads `/issue-triage`'s.
+
+#### Details settled in step 3
+
+- **Incomplete** means no fingerprint, or no `severity:` label, or no `effort:` label (what the
+  ranking reads). An incomplete issue still gets its Phase 3 disposition from its own text, but
+  no file is guessed from its prose. It is ranked after every complete unit, is never stacked,
+  and is never a stack parent.
+- **Issue ↔ PR edges:** `COLLIDES` with a PR → `DEPENDS-ON` the PR → `HOLD` until it merges
+  (not stacked, for the same reason a `COLLIDES` pair is grouped, not stacked). `OVERLAPS`
+  only → `STACK` on the PR's branch. An overlap with an earlier unit wins over one with a PR. A
+  PR from a fork cannot be a parent → `HOLD`. A PR that moots an issue it does not link →
+  `CLOSE-MOOT`.
+- A PR counts as stack depth 1, or its parent's depth + 1 when it is itself an unresolved
+  `work-issue-stack` child.
+- The new Phase 1.5 (evidence: fingerprints, labels, verification, open PRs) runs in
+  `/work-issue` batch mode too; batch mode skips only Phase 1 (filtering).
+- `/fix-order` places issues around open PRs but does **not** yet order PRs among themselves.
+  That moves in from `/pr-triage` in step 5 (D5).
 
 ### D4. `/work-issue` for one issue or one group; `/implement-spec` for a big spec
 

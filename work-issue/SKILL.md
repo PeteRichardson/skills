@@ -114,8 +114,17 @@ The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerpri
 1. `gh issue view <n> --json number,title,state,body,comments,labels,url`. Stop if the issue is closed — say so rather than working it anyway.
 2. **Deferred?** — stop if any label in `DEFERRAL_LABELS` is present: `backlog`, `icebox`, `someday`, `someday-maybe`, `future`, `deferred`, `on hold`, `wontfix`, or any `priority/backlog`-style namespaced equivalent. These mark work that is deliberately remembered but not scheduled; opening a PR against one makes a prioritization decision the label records as unmade. Report which label fired and offer to proceed anyway — a user who types the number themselves may well mean it, but the override must be theirs, not an assumption.
 3. **Finding ID** — scan the issue body and every comment for `/make-issues`' fingerprint marker (`<!-- project-review-finding ... -->`) and read its `finding_id:` line. Absent for hand-filed issues, issues fingerprinted by `/issue-triage`, and issues filed before the marker carried the field. Absent is normal: drop the `F<n>` segment. **Never infer an ID** by matching the issue against a review report — a report regenerated since filing may have renumbered.
-4. **Slug** — from the issue title: lowercase, strip punctuation and filler words (a, the, in, on, when, should), keep the 2–4 most specific words, join with `-`, truncate to 32 chars at a word boundary.
-5. Compose the branch name. Show it to the user before creating anything.
+4. **Verification** — scan the comments for `/issue-triage`'s verification marker (`<!-- issue-verification ... -->`). When there is more than one, use the newest. Absent is normal: verification is opt-in, and without a marker this skill works as it always did. When it is present, read its `result:` and the comment's **Steps to reproduce** and **Code path**:
+
+   | `result:` | What this skill does |
+   |---|---|
+   | `confirmed` | Phase 4 starts from its steps (see there). Do not reproduce the issue again. |
+   | `already-fixed` | Stop and report where the comment says the fix is. Offer to proceed anyway — the override is the user's, as for a deferral label. |
+   | `not-enough-detail`, `not-reproduced` | Stop and show the questions or what was tried. The user answers them before any code exists. |
+
+   In batch mode, `/fix-order` has already turned the last three into `CLOSE-MOOT` and `NEEDS-DECISION`, so only `confirmed` reaches this step there.
+5. **Slug** — from the issue title: lowercase, strip punctuation and filler words (a, the, in, on, when, should), keep the 2–4 most specific words, join with `-`, truncate to 32 chars at a word boundary.
+6. Compose the branch name. Show it to the user before creating anything.
 
 ## Phase 2: Is this issue already addressed?
 
@@ -177,7 +186,9 @@ The worktree directory takes the branch name.
 
 ## Phase 4: Do the work
 
-This skill owns the lifecycle, not the engineering. Use the normal skills inside the worktree: `superpowers:test-driven-development` for the change itself, `/run-tests` to verify, `/pre-commit` before committing, `/commit-message` for the message. Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it for linking).
+This skill owns the lifecycle, not the engineering. Use the normal skills inside the worktree: `/tdd` for the change itself, `/run-tests` to verify, `/pre-commit` before committing, `/commit-message` for the message. Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it for linking).
+
+**When Phase 1 found a `confirmed` verification**, its **Steps to reproduce** are the first failing test. Write them as a test, see it fail for the reason the comment gives, then fix. Start reading the code at its **Code path**. If the test does not fail, the code has changed since the verification `sha:` — say so, and ask before going on, rather than writing a fix for a bug you cannot see.
 
 If the issue needs design decisions the issue text doesn't settle, ask before implementing. A wrong fix delivered fast is worse than one round of questions.
 
@@ -347,7 +358,7 @@ For "every open issue not already addressed by a PR":
 
    Report the excluded issues by number and title. A deferred issue that silently never appears reads as "nothing left to do" when the truth is "you decided not to do these" — and a mistakenly-labelled issue would otherwise stay invisible forever.
 2. Run Phase 2's three checks per issue; report the skips as a list with the reason each fired.
-3. **Order the queue using the `fix-order` protocol.** Read `~/.claude/skills/fix-order/SKILL.md` and execute its Phases 2–5, including Phase 4.5, against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Do **not** try to invoke it through the Skill tool — `fix-order` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/fix-order` or by reading its protocol file directly, which is what this step does.
+3. **Order the queue using the `fix-order` protocol.** Read `~/.claude/skills/fix-order/SKILL.md` and execute its Phases 1.5–5, including Phase 4.5, against the candidate set from steps 1–2, skipping its Phase 1 (this batch already did that filtering). Its Phase 1.5 still runs: it reads the open PRs and the verification results that the ordering depends on. Do **not** try to invoke it through the Skill tool — `fix-order` sets `disable-model-invocation: true`, so it is reachable only by the user typing `/fix-order` or by reading its protocol file directly, which is what this step does.
 
    Run it fresh every time — never read a previous `.claude/tmp/fix-order/` snapshot, which any merge, close, or label change since invalidates. Its dispositions bind this run:
 
@@ -355,8 +366,9 @@ For "every open issue not already addressed by a PR":
    |---|---|
    | `WORK n` | Work it alone, at position n. |
    | `GROUP` | Work all its issues on **one** worktree, one branch, one PR — see the grouped-unit naming above. Never split a group into consecutive single runs; the second branch would be cut from `main` and conflict with the first by construction. |
-   | `STACK` | Work it on a branch cut from its parent's remote branch, PR based on that branch. The parent is always earlier in the same run, so its branch already exists — batch mode is sequential. |
-   | `HOLD` | Report as held for the next batch, naming the chain it overlaps, and skip. Not a deferral: nothing is wrong with the issue, it just exceeds the depth cap. |
+   | `STACK` | Work it on a branch cut from its parent's remote branch, PR based on that branch. A parent unit is always earlier in the same run, so its branch already exists — batch mode is sequential. A parent PR (`parent_pr:`) already exists: its branch is the PR's `headRefName`, and the stack marker names that PR. |
+   | `HOLD` | Report as held for the next batch, naming what holds it — the chain it overlaps, or the open PR it waits on — and skip. Not a deferral: nothing is wrong with the issue. |
+   | `WORK` marked incomplete | Work it, last, as `/fix-order` ranked it. Say in the report that `/issue-triage` had not completed it. |
    | `NEEDS-DECISION` | **Halt and ask.** Present the question and the options the issue names. Do not implement, do not guess, do not skip silently. |
    | `DEFER` | Report as a deferral proposal and skip. Never apply the label. |
    | `CLOSE-MOOT` | Report the proposal with its evidence and skip. Never close the issue. |
@@ -372,7 +384,9 @@ For "every open issue not already addressed by a PR":
      #11  WORK              base: main
      #15  STACK on #11      base: Fix-I11-F2-config-parse
      #18  STACK on #15      base: Fix-I15-F9-config-validate
+     #16  STACK on PR #31   base: Fix-I9-retry-backoff
      #21  HOLD              overlaps the #11 -> #15 -> #18 chain, held to next batch
+     #17  HOLD              waits for PR #29 to merge
    ```
 
    Stacking needs no flag. It is what `/fix-order` already decided; the plan is where it
