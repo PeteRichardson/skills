@@ -1,5 +1,6 @@
 ---
 name: make-issues
+argument-hint: "[path] [--all] [-f IDs...] | backfill [#n ...]"
 description: Convert findings from a /project-review report (PROJECT_REVIEW.md) or a /code-review report into GitHub issues, with severity/category/effort labels and dedup against existing issues. Also backfills the dedup fingerprint, any missing severity/category/effort labels, and a missing summary onto hand-filed issues. Use when the user wants to turn review findings into tracked GitHub issues, file issues from a review report, or sync labels/fingerprints onto existing issues. Triggers on "turn these findings into issues", "file GitHub issues for the review", "make issues from the code review", "/make-issues".
 disable-model-invocation: false
 ---
