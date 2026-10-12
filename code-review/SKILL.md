@@ -584,7 +584,7 @@ Keeping the frontmatter accurate is the only thing this skill needs to do to sup
 - **Large codebases**: Scoping to a specific folder/file is recommended for repos >1000 files
 - **Token budget**: Analyzing many files at once may exceed API limits; use `--language` or folder scoping to reduce scope
 - **Line number drift**: After many edits, old reports' line numbers become inaccurate; use `--refresh` to rescan
-- **PR mode reads only**: no tests are run against the PR — that's CI's job, and needing it is what would force a worktree. One PR per run; merge-order questions across several PRs are `/pr-triage`'s
+- **PR mode reads only**: no tests are run against the PR — that's CI's job, and needing it is what would force a worktree. One PR per run; merge-order questions across several PRs are `/merge-order`'s
 
 ## Troubleshooting
 

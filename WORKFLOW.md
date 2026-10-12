@@ -17,7 +17,7 @@ The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 | 2 | File the work | `/make-issues [--all]` | GitHub issues, labelled + fingerprinted | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:`/`source:` labels |
 | 3 | Decide what to work | `/fix-order` | Disposition per issue + ordered work units | `.claude/tmp/fix-order/FIX_ORDER.md` |
 | 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (one name, local and remote), open PRs, a resolution comment per issue |
-| 5 | Decide merge order | `/pr-triage` | Blast-radius-ranked merge sequence | `.claude/tmp/pr-triage/PR_TRIAGE.md` |
+| 5 | Decide merge order | `/merge-order` | `/fix-order`'s PR order, with ready / stack / rebase / next action per PR | `.claude/tmp/merge-order/MERGE_ORDER.md` |
 | 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
 
 Then loop: a fresh `/project-review` after a batch of merges is how the next round starts.
@@ -32,7 +32,7 @@ gh auth status                                              # stages 2-5 need th
 echo '**/.claude/tmp/' >> "$(git config --global core.excludesFile)"
 ```
 
-The second line keeps `/fix-order` and `/pr-triage` scratch output out of every repo's
+The second line keeps `/fix-order` and `/merge-order` scratch output out of every repo's
 `git status`. Without it each skill falls back to appending to that repo's
 `.git/info/exclude` on first run — which works, but is obscure enough to be confusing later.
 
@@ -58,12 +58,12 @@ It's carried like this:
         ↓
 /work-issue        reads it back → branch Fix-I60-F3-rust-ps-path → PR #68
         ↓
-/pr-triage         displays all three side by side in the merge table
+/fix-order         displays all three side by side in its PR merge order
 ```
 
 Rule that holds at every stage: **an absent ID is correct output; an inferred one is a bug.**
 Hand-filed issues have no `F<n>` and never get one — `/issue-triage` deliberately
-won't invent one, and neither will `/work-issue` or `/pr-triage`.
+won't invent one, and neither will `/work-issue`, `/fix-order`, or `/merge-order`.
 
 ---
 
@@ -235,18 +235,20 @@ git push             # one name, local and remote: a plain push reaches the PR
 ## Stage 5 — Decide merge order
 
 ```
-/pr-triage                         # full open queue
-/pr-triage #7 #8 #12               # scoped burn-down
-/pr-triage list                    # past snapshots, live merged/closed status
+/merge-order                         # full open queue
+/merge-order #7 #8 #12               # scoped burn-down
+/merge-order list                    # past snapshots, live merged/closed status
 ```
 
-Ranks by **blast radius** — how many other open PRs share a file with this one — ascending,
-so each merge disturbs the fewest remaining PRs. Ties break on staleness, then size. A PR
-linked to a critical-severity issue is promoted to a critical tier ahead of the whole queue,
-and the report says outright which PRs pay for that in extra rebase work.
+The order comes from `/fix-order` (its Phase 4.6), run fresh — one source of order for issues
+and PRs. A stack parent merges before its child; a PR linked to a critical-severity issue
+goes first; then **blast radius** — how many other open PRs share a file with this one —
+ascending, so each merge disturbs the fewest remaining PRs; then staleness, then size.
 
-Worth reading beyond the order itself: the **likely semantic collision** pairs. Those are the
-ones where a careless rebase resolution merges cleanly and is still wrong.
+`/merge-order` adds one line per PR for the moment of merging: **Ready?** (CI, review,
+draft, conflicts), **Stack** (parent open, or merged and waiting for a restack), **Rebase
+likely?** (shares a file with an earlier PR — marked `(collision)` when a careless rebase
+could merge cleanly and still be wrong), and **Next** (merge, restack, rebase, wait).
 
 ## Stage 6 — Merge, manually
 
@@ -262,8 +264,8 @@ Deliberately not automated. Work down the stage-5 sequence one PR at a time:
 3. **`/work-issue restack`** if anything was stacked on it. A child branch still carries its
    parent's commits until this runs; merging one before restacking produces a PR whose diff
    includes changes that already landed.
-4. **Re-run `/pr-triage`** — repeat-run mode re-ranks what's left against the new base and
-   tells you what changed. The previous order is invalidated by every merge; don't work down
+4. **Re-run `/merge-order`** — it recomputes the order against the new base and tells you
+   what changed. The previous order is invalidated by every merge; don't work down
    a stale list.
 5. Delete the local branch when the PR is merged: `git branch -D Fix-I60-F3-rust-ps-path`.
    `-D`, because a rebase- or squash-merge leaves commits that are not ancestors of `main`, so
@@ -298,12 +300,12 @@ Or by hand:
 | Which issues have no place in the order yet? | `/fix-order list` — outstanding units vs. `gh issue list --state open` |
 | Is anything blocked on me? | The `NEEDS-DECISION` / `DEFER` / `CLOSE-MOOT` sections of the latest `FIX_ORDER.md` |
 | What work is in flight? | `git branch -a \| grep -E 'Fix-I[0-9]+'` and `gh pr list` |
-| Is there a merge order? | `/pr-triage list` — and whether anything merged since it was generated |
+| Is there a merge order? | `/merge-order list` — and whether anything merged since it was generated |
 | What's finished? | `gh pr list --state merged --limit 20` |
 
 Both `list` subcommands resolve their snapshots against **live** GitHub state, so a snapshot
 whose queue has entirely resolved shows up as fully closed rather than as pending work.
-`/fix-order clean` and `/pr-triage clean` remove exactly those.
+`/fix-order clean` and `/merge-order clean` remove exactly those.
 
 ---
 
@@ -340,7 +342,7 @@ is a convenience, not a commitment.
 Each of these is a decision that belongs to you, and every skill involved is written to
 surface it rather than take it:
 
-- **Merge anything.** `/pr-triage` is advisory, full stop.
+- **Merge anything.** `/merge-order` is advisory, full stop.
 - **Say anything on your behalf on a PR.** `/code-review <pr>` writes a local report and
   stops — no review comment, no requested changes, no approval. Publishing a review is your
   call. The pipeline's complete set of GitHub writes stays: `/make-issues` (issues and

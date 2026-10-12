@@ -7,7 +7,7 @@ disable-model-invocation: true
 # Pipeline
 
 A status skill for the six-stage workflow documented in `~/.claude/skills/WORKFLOW.md`:
-review → file → fix-order → work → pr-triage → merge.
+review → file → fix-order → work → merge-order → merge.
 
 It answers one question — *what do I type next?* — and it answers it from artifacts rather
 than from anything it remembers.
@@ -26,7 +26,7 @@ never trust a previous run's conclusion — the user merges PRs, closes issues, 
 branches outside this skill constantly, and a tracker would be wrong the first time they did.
 
 **This skill runs nothing.** It names the next command; the user types it. That boundary is
-the same one `/fix-order` and `/pr-triage` hold, and it's what keeps stage 6 — merging —
+the same one `/fix-order` and `/merge-order` hold, and it's what keeps stage 6 — merging —
 a thing the user does by hand deliberately.
 
 **The script does the counting; you do the judgment.** `pipeline-status` (next to this file)
@@ -68,7 +68,7 @@ ls -lt docs/reviews/                                       # stage 1
 gh issue list --state open --limit 300 --json number,labels # stage 2
 ls -lt .claude/tmp/fix-order/                           # stage 3
 git branch -a | grep -E 'Fix-I[0-9]+' ; gh pr list         # stage 4
-ls -lt .claude/tmp/pr-triage/                              # stage 5
+ls -lt .claude/tmp/merge-order/                              # stage 5
 gh pr list --state merged --limit 30                       # stage 6
 ```
 
@@ -82,7 +82,7 @@ confirm counts the script already produced.
 | `N NEEDS-DECISION` | The `Decisions needed` section of the newest `.claude/tmp/fix-order/*.md` | The actual question and the options the issue named — answerable without opening GitHub. Mention `/fix-order label` if the issues don't already carry `status: needs-decision`, but never run it: it mutates GitHub |
 | A fix-order snapshot exists | Its `Proposed deferrals` / `Proposed closures` sections | Standing proposals, flagged as awaiting the user's call. Never as blockers |
 | `N CONFLICTING` PRs | `gh pr list --json number,title,mergeable` | Which PRs need author action regardless of queue position |
-| A merge order exists | The `Overlap detail` section of the newest `.claude/tmp/pr-triage/*.md` | Any **likely semantic collision** pairs — the ones where a careless rebase merges cleanly and is still wrong |
+| A merge order exists | The `Likely collisions` section of the newest `.claude/tmp/merge-order/*.md` | Any **likely semantic collision** pairs — the ones where a careless rebase merges cleanly and is still wrong |
 | `[stale]` on the merge order | Nothing extra | That the order must be re-run before working down it |
 | `[stale]` on the review | `git log --oneline -<N>` for the commits since | Whether the drift actually touches reviewed code, or is unrelated churn. A report stale only by docs commits isn't really stale |
 
@@ -193,7 +193,7 @@ record — `docs/reviews/` for stage 1, `source:` labels and fingerprint markers
 for stage 6 — and unlike a tracker they're written by the stages themselves, so they can't
 disagree with reality.
 
-This is the same reasoning behind `/fix-order list` and `/pr-triage list` resolving their
+This is the same reasoning behind `/fix-order list` and `/merge-order list` resolving their
 snapshots against live GitHub state rather than trusting what the snapshot recorded.
 
 ## Why the detection lives in a script, not in the skill
@@ -210,7 +210,7 @@ report's staleness matters.
 
 ## Why this skill is user-invoked only
 
-`disable-model-invocation: true`, matching `/fix-order` and `/pr-triage`.
+`disable-model-invocation: true`, matching `/fix-order` and `/merge-order`.
 
 The specific reason is a trigger collision: `/project-review`'s description already claims
 "what should I work on next" and "what needs to be done in this repo" as conversational

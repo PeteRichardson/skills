@@ -158,9 +158,9 @@ if [[ $HAS_GH -eq 1 ]]; then
   done
 fi
 
-# ---------------------------------------------------------------- stage 5: pr-triage
+# ---------------------------------------------------------------- stage 5: merge-order
 
-PT_DIR=".claude/tmp/pr-triage"
+PT_DIR=".claude/tmp/merge-order"
 PT_FILE=$(newest "$PT_DIR/*.md")
 PT_COUNT=0; PT_AGE=""; PT_TOP=""; PT_STALE=0
 if [[ -n $PT_FILE ]]; then
@@ -237,7 +237,7 @@ next_step() {
     echo "/work-issue all  —  $UNSTARTED open issue(s) with no branch or PR"; return
   fi
   if [[ $PRS_OPEN -ge 2 && ( -z $PT_FILE || $PT_STALE -eq 1 ) ]]; then
-    echo "/pr-triage  —  $PRS_OPEN PRs open, ${PT_FILE:+merge order is stale}${PT_FILE:-no merge order yet}"
+    echo "/merge-order  —  $PRS_OPEN PRs open, ${PT_FILE:+merge order is stale}${PT_FILE:-no merge order yet}"
     return
   fi
   if [[ ${RESTACK_NEEDED:-0} -gt 0 ]]; then
@@ -245,7 +245,7 @@ next_step() {
     return
   fi
   if [[ $PRS_OPEN -ge 1 && -n $PT_TOP ]]; then
-    echo "review and merge #$PT_TOP, then re-run /pr-triage  —  every merge invalidates the rest of the order"
+    echo "review and merge #$PT_TOP, then re-run /merge-order  —  every merge invalidates the rest of the order"
     [[ -z $(newest "docs/reviews/code-review_PR${PT_TOP}_*.md") ]] &&
       echo "     (/code-review $PT_TOP for the line-level pass first — it has no review report yet)"
     return

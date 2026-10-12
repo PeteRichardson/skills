@@ -83,7 +83,7 @@ Composing it:
 * **State the root cause you actually found**, not a paraphrase of the issue title. When it turns out to differ from what the reporter described, say so plainly — that's the single most useful sentence in the comment for them.
 * **Cite the files and symbols you actually touched.** No invented paths, no guessed line numbers.
 * **Never claim tests pass without having run them** in the worktree.
-* **Omit `Deliberately not covered` entirely** when there were no real scope decisions. Never write "None" — same convention as `/pr-triage`'s severity-overrides section.
+* **Omit `Deliberately not covered` entirely** when there were no real scope decisions. Never write "None" — same convention as `/merge-order`'s optional sections.
 * **Grouped units get one comment per issue, and they must differ.** Every section describes only that issue's slice; pasting one comment across the unit recreates the exact problem this solves. If a grouped change genuinely can't be decomposed per issue, say that plainly under `What #22 proposes` rather than inventing a split.
 * **For a `STACK` unit**, the comment must say the PR is stacked on #`<parent_pr>` and cannot
   merge until that one does. A reporter reading the issue would otherwise reasonably expect
@@ -97,7 +97,7 @@ Marker fields:
 * `grouped_with:` lists the *other* issue numbers in the unit. Omitted entirely for a single-issue unit.
 * `finding:` carries the `F<n>` from Phase 1. Omitted when absent, and **never inferred** — the same rule the branch name follows.
 
-The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerprint marker owns `finding_id:`, and three protocols scan issue comments for it (this skill's Phase 1, `/fix-order` Phase 1, `/pr-triage` Phase 3). All three anchor on the marker name `project-review-finding`, so using a different key name here means even a careless grep can't cross the two markers.
+The key is `finding:`, deliberately not `finding_id:`. `/make-issues`' fingerprint marker owns `finding_id:`, and three protocols scan issue comments for it (this skill's Phase 1, `/fix-order` Phase 1.5 for issues, and `/fix-order` Phase 4.6 for the issues a PR links). All three anchor on the marker name `project-review-finding`, so using a different key name here means even a careless grep can't cross the two markers.
 
 ## Phase 0: Resolve the invocation
 
@@ -142,7 +142,7 @@ Run from the main repo, not from another worktree:
 
 1. `git fetch origin` and confirm the base branch (default branch unless the user says otherwise).
 2. Ensure `.worktrees/` is ignored — **without modifying any tracked file**, the same
-   convention `/pr-triage` and `/fix-order` use for `.claude/tmp/`:
+   convention `/merge-order` and `/fix-order` use for `.claude/tmp/`:
 
    ```bash
    git check-ignore -q .worktrees/ || cat >> .git/info/exclude <<'EOF'
@@ -311,7 +311,7 @@ something a batch run does on its own.
    mode — see `work-issue/restack-recipe.test.sh`, which proves the naive form conflicts.
 6. **On conflict: stop.** `git rebase --abort`, keep the worktree, print its absolute path,
    and move to the next PR. Never resolve a restack conflict unattended — a conflict here is
-   the semantic-collision case `/pr-triage` warns about, and a plausible-looking resolution
+   the semantic-collision case `/fix-order` and `/merge-order` warn about, and a plausible-looking resolution
    can merge cleanly and still be wrong.
 7. **Verify before pushing.** `git log --oneline origin/<target>..<child branch>` must contain
    only the child's own commits. If any of the parent's are still there, something is wrong
@@ -374,7 +374,7 @@ For "every open issue not already addressed by a PR":
    | `CLOSE-MOOT` | Report the proposal with its evidence and skip. Never close the issue. |
 
    If `~/.claude/skills/fix-order/SKILL.md` isn't present (it's an optional companion, not a hard dependency), fall back to working the candidate set in issue-number order and say so explicitly — an unordered batch is a degraded run, not the normal path.
-4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the problem `/pr-triage` then has to clean up.
+4. Run Phases 1 and 3–6 on each work unit **sequentially**, in the triage order — one worktree at a time, fully torn down before the next is created. Sequential is deliberate: parallel worktrees on overlapping code produce conflicting PRs, which is the rebase work `/merge-order` then has to sequence.
 5. A failure on one unit doesn't abort the run. Record it, move to the next, and end with a table: issues, PR (or the failure reason), branch name, comment posted y/n, worktree removed y/n — plus the `NEEDS-DECISION`, `DEFER`, and `CLOSE-MOOT` sets, which are the run's real output for the user to act on.
 6. Before starting a batch of more than ~3 units, show the fix-order plan and confirm. Each unit
    opens a real PR. The plan names each unit's base explicitly, so a stack is visible before
@@ -398,9 +398,9 @@ This skill is stage 4 of the review → issue → PR → merge pipeline (`~/.cla
 
 * **Batch run, or any run leaving 2+ PRs open** — the merge order:
 
-  > Next: `/pr-triage` to rank the open PRs by blast radius and get a merge order.
+  > Next: `/merge-order` to see the open PRs in merge order, with what each one needs before it can merge.
 * **Single run leaving one PR open** — no triage needed for a queue of one; say the PR is ready for review and merge.
-* **A `NEEDS-DECISION` halt** — the decision is the next step, not `/pr-triage`. Name the issue and repeat the question.
+* **A `NEEDS-DECISION` halt** — the decision is the next step, not `/merge-order`. Name the issue and repeat the question.
 * **Any unit failed, or a worktree was kept** — lead with that and its absolute path. A kept worktree is live state; it outranks the next command.
 * **A batch that created any `STACK` units** — say that the stacked PRs must merge in chain
   order, and that `/work-issue restack` is the step between merging a parent and merging its
@@ -485,7 +485,7 @@ Once the PR is open, the local tree has served its purpose — review happens on
 
 ## How this fits with the other skills
 
-`/project-review` and `/code-review` find the work; `/make-issues` files it as GitHub issues and records the `finding_id` this skill reads back out; `/work-issue` turns one issue into a PR; `/pr-triage` orders the resulting PR queue for merging. The finding ID is the thread running through all four — it's why `/make-issues` records `finding_id` in its fingerprint marker even though it deliberately never *matches* on it.
+`/project-review` and `/code-review` find the work; `/make-issues` files it as GitHub issues and records the `finding_id` this skill reads back out; `/work-issue` turns one issue into a PR; `/merge-order` shows the resulting PR queue in `/fix-order`'s merge order. The finding ID is the thread running through all four — it's why `/make-issues` records `finding_id` in its fingerprint marker even though it deliberately never *matches* on it.
 
 ## Limitations
 

@@ -1,6 +1,6 @@
 ---
 name: fix-order
-description: Assess a set of open GitHub issues, together with the open PRs, and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Needs only the issues and PRs — no review report. Produces a scoped snapshot under .claude/tmp/fix-order/ with a relationship graph (file/symbol overlap with other issues and with open PRs, declared dependencies, supersession), a disposition per issue (including stacked and held units), and an ordered work plan ranked by dependency, severity, blast radius, then effort. Reads /issue-triage's verification results. Supports `/fix-order list`, `/fix-order open`, `/fix-order clean` [--all], and `/fix-order label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 1.5-5, including Phase 4.5, are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to prioritize the issue queue. A fix-order run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
+description: Assess a set of open GitHub issues, together with the open PRs, and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Needs only the issues and PRs — no review report. Produces a scoped snapshot under .claude/tmp/fix-order/ with a relationship graph (file/symbol overlap with other issues and with open PRs, declared dependencies, supersession), a disposition per issue (including stacked and held units), an ordered work plan ranked by dependency, severity, blast radius, then effort, and a merge order for the open PRs (stacks, critical tier, blast radius). It is the one source of order: /merge-order reads its PR order. Reads /issue-triage's verification results. Supports `/fix-order list`, `/fix-order open`, `/fix-order clean` [--all], and `/fix-order label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 1.5-5, including Phase 4.5, are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to prioritize the issue queue. A fix-order run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
 disable-model-invocation: true
 ---
 
@@ -26,7 +26,7 @@ The single exception is the **`label` subcommand**, which the user invokes separ
 
 **Deferral is the maintainer's call, not this skill's.** Proposing that an issue be deferred is useful; applying a `backlog` label is a priority decision belonging to the user. This skill proposes; it never applies a deferral label, and `label` won't either — see "Why `status: needs-decision` is labelled but `backlog` isn't" below for why those two aren't the same act.
 
-**Axes stay separate.** Dependency order, severity, blast radius, and effort are four different things. Never blend them into a score — tier them, and state the tradeoff in prose when they conflict. (Same reasoning as `/pr-triage`'s severity-vs-blast-radius tiering.)
+**Axes stay separate.** Dependency order, severity, blast radius, and effort are four different things. Never blend them into a score — tier them, and state the tradeoff in prose when they conflict. (Same reasoning as Phase 4.6's critical tier for PRs.)
 
 ## Phase 0: Subcommands
 
@@ -55,6 +55,7 @@ Check the invocation before doing anything else:
 * **`/fix-order clean`** — read every file's frontmatter issue numbers, make one `gh issue list --state all --json number,state` call covering the union. Any file whose entire issue set is now closed is a removal candidate. Show candidates plus what's being kept and why, and ask for confirmation before deleting. Stop here.
 * **`/fix-order clean --all`** — unconditional wipe of `.claude/tmp/fix-order/`. Show what will be deleted, ask for confirmation. Stop here.
 * **`/fix-order label`**, or **`/fix-order label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run the ranking.
+* **Executed as a PR-only sub-protocol by `/merge-order`** — `/merge-order` reads this file and runs only what the PR order needs: Phase 1.5 step 5 (the open PRs), the linked issues' `severity:` labels, the PR–PR `OVERLAPS` edges of Phase 2, and Phase 4.6. No issue is ranked, and no snapshot is written here — `/merge-order` writes its own. This keeps one source of order without paying for the issue analysis on every merge.
 * **`/fix-order`** (no args) — full-queue run, proceed to Phase 1.
 * **`/fix-order #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
 * **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 1.5–5, including Phase 4.5, directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 1.5, and still write the snapshot. Phase 1.5 is not skipped — the open PRs and the verification results are inputs to the graph, not filters.
@@ -89,7 +90,7 @@ Check the invocation before doing anything else:
 
 ## Phase 2: Build the relationship graph
 
-Nodes are the surviving issues and the open PRs. For every pair, determine which of these edges hold. Each requires different evidence; don't collapse them. A pair of two PRs gets no edge here — merge order between PRs is the merge stage's job.
+Nodes are the surviving issues and the open PRs. For every pair, determine which of these edges hold. Each requires different evidence; don't collapse them. A pair of two PRs gets only `OVERLAPS` here, from their diffs; Phase 4.6 classifies those pairs and orders the PRs.
 
 * **`OVERLAPS`** — both change the same file. An issue's files come from its fingerprint `file:` field; a PR's from its diff. An incomplete issue without a fingerprint has no files and gets no `OVERLAPS` edge. Verify an issue's path still exists; an issue filed against a since-renamed file is stale, and the *current* path is what matters. Pure set intersection, no judgment yet.
 * **`COLLIDES`** — both change the same *function or symbol*, not merely the same file. This requires actually opening the source and locating what each issue proposes to change — and, for a PR, reading `gh pr diff <n>` to see which symbols it changes. `OVERLAPS` without `COLLIDES` is incidental adjacency (two issues adding separate functions to one module) and does **not** justify grouping.
@@ -194,6 +195,45 @@ ungrouped (see "Why file overlap alone doesn't justify grouping").
 **Why depth 3:** a PR rejected at the bottom of a chain forces a restack of everything above
 it. That cost grows with depth; the benefit doesn't.
 
+## Phase 4.6: Order the open PRs
+
+The open PRs get a merge order here, so one skill gives one order for issues and PRs
+together. `/merge-order` reads this order; it never makes its own. The PRs are ranked
+among themselves, as their own list: a PR already exists, so it never waits behind an issue,
+and the issue units were already placed around the PRs (Phase 4 step 0, Phase 4.5).
+
+For PRs the rules are those that cost the least rebase work, in this order:
+
+1. **Stack constraint (hard).** For each PR with an unresolved `work-issue-stack` marker
+   (Phase 1.5), the parent merges before the child. A chain (the parent plus every PR
+   stacked on it, directly or transitively) moves as **one block**, at its root's rank, and
+   unpacks in link order. A marker whose `parent_pr` already merged is a child waiting for
+   its restack, not a stack member: it is unblocked, and the restack is outstanding. A
+   marker with `resolved: true` is ignored — that PR is an ordinary one.
+2. **Critical tier.** A PR whose linked issue has `severity: Critical` (or the repo's own
+   critical/P0, security, data-loss, or crash label — check what this repo uses) goes ahead
+   of every other PR, whatever its blast radius. Order the critical tier among itself by the
+   rules below. A chain with a critical PR anywhere in it promotes as one block, parent
+   first. Lower labels (`High`, `P2`, `enhancement`) promote nothing: the fix exists, so the
+   cost of a short wait is small, and only genuine urgency is worth extra rebase work for
+   the rest of the queue. If the repo has no severity labels, say so once and skip.
+3. **Blast radius**, ascending: the number of *other open PRs* that share at least one file
+   with it. Merging it forces a rebase on each of them. A stacked child's files are only its
+   own: `/work-issue` bases its PR on the parent's branch, so its diff never contains the
+   parent's files — no correction is needed.
+4. **Staleness**, older `updatedAt` first: drift gets worse whether or not anyone watches
+   the PR.
+5. **Size**, smaller `additions + deletions` first, last resort only.
+
+When a PR jumps the queue by the critical tier, say in the deliverable which PR, which
+issue and severity, and which other PRs now get more rebase work for it.
+
+For every pair of PRs that share a file, read both diffs and classify the overlap, as
+Phase 2 does for issues: **incidental adjacency** (near each other, no interaction) or
+**likely semantic collision** (the same function, invariant, or logic path). A likely
+collision is a judgment call — label it so. It is what a careless rebase resolves into
+something that merges cleanly and is wrong, so the deliverable names it.
+
 ## Phase 5: Deliverable
 
 This project uses `.claude/tmp/` as the shared convention for ephemeral skill output, namespaced per-skill. Before writing anything:
@@ -226,6 +266,18 @@ Write `.claude/tmp/fix-order/<filename>` with YAML frontmatter so `list` can rep
 ```yaml
 ---
 generated: <ISO 8601 timestamp>
+prs:
+  - number: 31
+    order: 1
+    critical: false
+    blast_radius: 0
+  - number: 29
+    order: 2
+    critical: false
+    blast_radius: 1
+    stack:
+      parent_pr: 31
+      blocked: true
 units:
   - order: 1
     disposition: GROUP
@@ -300,7 +352,7 @@ units:
 ---
 ```
 
-`units` is ordered by `order`, with unordered dispositions (`HOLD`, `NEEDS-DECISION`, `DEFER`, `CLOSE-MOOT`) last, carrying `order: ~`. `finding: ~` means no recorded finding ID — never guess one. A `STACK` on a unit carries `parent_order` and `parent_issue`; a `STACK` on an open PR carries `parent_pr` only. `incomplete: true` is written only on an incomplete unit, and omitted otherwise. Entries are never removed after an issue closes; see Repeat-run mode.
+`prs` is the Phase 4.6 merge order, one entry per open PR. `stack` is present only on a PR with an unresolved `work-issue-stack` marker; `blocked` is `true` while its parent is open. `units` is ordered by `order`, with unordered dispositions (`HOLD`, `NEEDS-DECISION`, `DEFER`, `CLOSE-MOOT`) last, carrying `order: ~`. `finding: ~` means no recorded finding ID — never guess one. A `STACK` on a unit carries `parent_order` and `parent_issue`; a `STACK` on an open PR carries `parent_pr` only. `incomplete: true` is written only on an incomplete unit, and omitted otherwise. Entries are never removed after an issue closes; see Repeat-run mode.
 
 Then the body:
 
@@ -320,6 +372,18 @@ Then the body:
   `Blast` is the Phase 4 blast radius. `—` for a unit with no position or no known files.
 
   Identifier formatting, since conflating the three spaces is the failure mode this table prevents: issue numbers keep `#`; finding IDs stay bare (`F3`, or a bare ordinal from `/code-review`); use `—` for absent, never a blank cell, never a guess.
+* **PR merge order** — one row per open PR, in Phase 4.6 order:
+
+  ```markdown
+  | Order | PR # | Issue # | Finding | Title | Blast | Rationale |
+  |-------|------|---------|---------|-------|-------|-----------|
+  | 1 | #31 | #9 | — | Retry backoff | 0 | shares no file with another open PR |
+  | 2 | #29 | #8 | F4 | Option parsing | 1 | stacked on #31; merges after it, restack in between |
+  ```
+
+  Then the critical-tier promotions with who pays for them, the stack chains written as
+  executable steps (`merge #31 → /work-issue restack → merge #29`), and the PR–PR overlap
+  classifications. Omit any of these three when it has nothing to say.
 * **Grouping detail** — for each `GROUP` unit, what specifically collides (file, function, why separate PRs would conflict) and the suggested combined branch slug.
 * **Stack detail** — for each chain, the order of its links, which file overlap put each
   child on its parent, and the explicit note that a child cannot merge before its parent.
@@ -391,7 +455,8 @@ This skill never runs the next step itself; it prints the command and stops.
 * Never fill in what an incomplete issue lacks — no file guessed from its prose, no severity from its title. Rank it last and send it to `/issue-triage`.
 * Never give an issue a free position when it `OVERLAPS` or `COLLIDES` with an open PR. It stacks on the PR or waits for it.
 * Never close an issue because its verification says `already-fixed`, and never rank an issue lower because it is unverified. A verification result is evidence for a proposal.
-* Never order open PRs among themselves here. This skill places issues around the PRs; the merge order is the merge stage's job.
+* Keep staleness and size as tiebreakers in the PR order. Never let them override the stack constraint, the critical tier, or blast radius.
+* `/merge-order` never makes its own order. When the two disagree, this skill is wrong or out of date — fix it here.
 * If `gh` fails (auth, rate limit) or an issue number doesn't exist, stop and report. No silent retries, no guessing at issue contents.
 
 ## Repeat-run mode
@@ -484,24 +549,41 @@ The intended loop:
 2. `/make-issues` — file it; `/issue-triage` — complete every issue (summary, labels, fingerprint)
 3. `/fix-order` — decide what to work, in what order, what to combine, what to drop
 4. `/work-issue all` — execute the plan (it runs this skill's Phases 1.5–5, including Phase 4.5, as a sub-protocol to order its queue)
-5. `/pr-triage` — order the resulting PR queue
+5. `/merge-order` — this skill's PR order, plus what you need while merging (ready, blocked, rebase likely, next action)
 6. Merge manually in the recommended order
 
 Step 3 replaces what used to be a manual pass of labelling things `backlog` by hand.
 
 The fingerprint marker that `/make-issues` and `/issue-triage` write carries a `file:` field, which is exactly the file-overlap signal Phase 2 needs. On a repo where every issue has been through `/issue-triage`, most of Phase 2 is free. An issue that has not is ranked last with "run `/issue-triage` first", rather than placed from a guess at its prose.
 
+## Why blast radius
+
+Ranking by size ("small ones first") or by complexity ("the big one first") optimizes the
+wrong unit — the change in hand, not the work left in the queue. A small change in a file
+that every other open PR or issue touches forces a rebase on all of them; a large change in
+a file nobody else touches costs nothing. Blast radius measures what happens to the rest of
+the queue, which is the thing to keep small. Size, staleness, and effort only break ties.
+
+## Why severity is a tier, not a weight
+
+Blast radius measures engineering cost; severity measures the cost of delay. They can point
+in opposite directions — a critical fix can have the worst blast radius, when the bug is in
+code everyone touches. One weighted number would hide that. Tiers make it visible: the
+urgent change goes first, and the deliverable says who pays for it in rebase work. For
+issues every severity tier counts; for PRs only the critical tier does, because the fix
+already exists and a short wait costs little.
+
 ## Why file overlap alone doesn't justify grouping
 
 `OVERLAPS` (same file) over-flags badly on any repo with a few large modules — in a codebase where half the issues touch one model file, grouping on file overlap would collapse the entire queue into one PR. `COLLIDES` (same function or symbol) is the signal that actually predicts a conflict, and it's the only one that justifies combining issues. The cost is that `COLLIDES` can't be computed from metadata; it requires opening the source. That's a deliberate trade — the cheap signal is kept as a filter that narrows what needs the expensive check.
 
-This mirrors `/pr-triage`'s Phase 2/Phase 4 split for the same reason.
+Phase 4.6 makes the same split for PR pairs, for the same reason.
 
 ## Limitations
 
 - `MOOTS` detection is a judgment call over issue prose, and prose is often optimistic about what a fix will cover. The skill is deliberately biased toward leaving an issue as `WORK` and raising the question, since a wrongly-closed issue is a worse error than a redundant PR.
 - Dependencies that nobody wrote down and that aren't visible in the code are invisible here. Declared dependencies are only as good as the issue text.
-- This skill reads open PRs to place issues around them, but it does not order the PRs among themselves. That is still `/pr-triage`'s job, downstream.
+- File overlap between PRs is necessary but not sufficient. Two PRs can change different files and still conflict in behavior (one renames a function the other calls). That shows up only when the code runs, so run the tests after every merge.
 - Severity ordering depends on the repo having severity labels. On a repo without them, ordering falls back to dependency, blast radius, and effort, which is weaker. `/issue-triage` adds the labels.
 - Blast radius counts files, not symbols. Two changes in the same large file count as an overlap even when they would merge cleanly.
 

@@ -1,6 +1,6 @@
 # Unified issue workflow — design
 
-Status: steps 1–4 implemented (see "Implementation order"); steps 5–7 not yet. Touches `/issue-triage`, `/make-issues`,
+Status: steps 1–5 implemented (see "Implementation order"); steps 6–7 not yet. Touches `/issue-triage`, `/make-issues`,
 `/work-issue`, `/code-review`, `/pr-triage`, `/pipeline` (and `pipeline-status`),
 `WORKFLOW.md`, and this repo's `AGENTS.md`. Adds `/fix-order`. Renames `/pr-triage` to
 `/merge-order`.
@@ -270,6 +270,23 @@ per PR:
 
 The blast-radius ranking, the severity override, and the stack constraint move from
 `/pr-triage` into `/fix-order`.
+
+#### Details settled in step 5
+
+- `/fix-order` Phase 4.6 orders the open PRs with `/pr-triage`'s rules, unchanged: stack
+  chains as one block, then the **critical tier only** (a lower severity does not promote a
+  PR — the fix exists, so a short wait costs little), then blast radius among open PRs, then
+  staleness, then size. PR–PR overlaps are classified there (incidental or likely collision).
+- `/fix-order` writes the PR order as a `prs:` array and a "PR merge order" table in
+  `FIX_ORDER.md`.
+- `/merge-order` runs a **PR-only sub-protocol** of `/fix-order` (open PRs, linked-issue
+  severity, PR–PR overlaps, Phase 4.6), not the issue ranking, so a merge-time check does not
+  pay for the whole issue analysis.
+- `/merge-order` keeps `list`, `open`, `clean`, and the `prs:` frontmatter shape that
+  `pipeline-status` reads. It no longer reuses old snapshot data: every run is fresh.
+- References to `/pr-triage` were renamed in the same step (as with `/fix-order`), so no
+  hand-off points at a skill that is gone. Step 6 still reworks `WORKFLOW.md` and `/pipeline`
+  as a whole.
 
 A guided lesson on the dispositions (`WORK`, `GROUP`, `STACK`, …), on stacked PRs and
 `restack`, and on how to read `/merge-order`, comes after steps 3 and 5. The user then decides
