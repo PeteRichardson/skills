@@ -1,6 +1,6 @@
 # Unified issue workflow — design
 
-Status: steps 1–5 implemented (see "Implementation order"); steps 6–7 not yet. Touches `/issue-triage`, `/make-issues`,
+Status: steps 1–6 implemented (see "Implementation order"); step 7 not yet. Touches `/issue-triage`, `/make-issues`,
 `/work-issue`, `/code-review`, `/pr-triage`, `/pipeline` (and `pipeline-status`),
 `WORKFLOW.md`, and this repo's `AGENTS.md`. Adds `/fix-order`. Renames `/pr-triage` to
 `/merge-order`.
@@ -287,6 +287,21 @@ The blast-radius ranking, the severity override, and the stack constraint move f
 - References to `/pr-triage` were renamed in the same step (as with `/fix-order`), so no
   hand-off points at a skill that is gone. Step 6 still reworks `WORKFLOW.md` and `/pipeline`
   as a whole.
+
+#### Details settled in step 6
+
+- `/issue-triage` is the gate at the end of stage 2, not a stage of its own, so the six
+  stages and the dashboard keep their shape. `pipeline-status` counts an open issue with no
+  `severity:` or `effort:` label as **incomplete** (labels only: the fingerprint is in a
+  comment, and one call per issue is too slow), and names `/issue-triage` before `/fix-order`.
+- `pipeline-status` marks the fix-order snapshot `[stale]` when an issue changed after it, and
+  then names `/fix-order` before an answer to its `NEEDS-DECISION`. The `/pipeline` override
+  that did this by hand is gone.
+- An issue counts as started when a branch name carries `I<n>` or an open PR closes it. A PR
+  from `/implement-spec` counts. Issues with a deferral label are not counted as unstarted.
+- `WORKFLOW.md` gets the diagram above, the spec path (`/grill-with-docs` → `/to-spec` →
+  `/to-tickets` → `/issue-triage` → `/implement-spec`), and a table of where Matt's skills fit.
+  The "one known bug" path now goes through `/issue-triage`.
 
 A guided lesson on the dispositions (`WORK`, `GROUP`, `STACK`, …), on stacked PRs and
 `restack`, and on how to read `/merge-order`, comes after steps 3 and 5. The user then decides

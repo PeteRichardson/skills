@@ -79,7 +79,7 @@ if [[ $HAS_GH -eq 1 ]]; then
   gh issue list --state open --limit 300 \
      --json number,labels,updatedAt > "$TMP/issues" 2>"$TMP/err" &
   gh pr list --state open --limit 100 \
-     --json number,title,mergeable,body > "$TMP/prs" 2>/dev/null &
+     --json number,title,mergeable,body,closingIssuesReferences > "$TMP/prs" 2>/dev/null &
   gh pr list --state merged --limit 30 \
      --json number,mergedAt > "$TMP/merged" 2>/dev/null &
   wait
@@ -120,23 +120,43 @@ fi
 
 # ---------------------------------------------------------------- stage 2: issues
 
-ISSUES_OPEN=0; ISSUES_FROM_REVIEW=0
+# An issue is incomplete until /issue-triage has given it the labels /fix-order ranks
+# by. The fingerprint is part of "complete" too, but it lives in a comment, and one
+# gh call per issue is too slow for a dashboard -- so only the labels are checked.
+# This is the stage-2 gate for issues from every source: /make-issues, /to-tickets,
+# or a person.
+ISSUES_OPEN=0; ISSUES_FROM_REVIEW=0; ISSUES_INCOMPLETE=0
 if [[ $HAS_GH -eq 1 ]]; then
   ISSUES_OPEN=$(jq -r 'length' < "$TMP/issues" 2>/dev/null || echo 0)
   ISSUES_FROM_REVIEW=$(jq -r '
     [ .[] | select(.labels | map(.name) | any(startswith("source: "))) ] | length
   ' < "$TMP/issues" 2>/dev/null || echo 0)
+  ISSUES_INCOMPLETE=$(jq -r '
+    [ .[] | (.labels | map(.name)) as $l
+          | select(($l | any(startswith("severity: ")) | not)
+                or ($l | any(startswith("effort: ")) | not)) ] | length
+  ' < "$TMP/issues" 2>/dev/null || echo 0)
 fi
 
 # ---------------------------------------------------------------- stage 3: fix-order
 
-IT_DIR=".claude/tmp/fix-order"
-IT_FILE=$(newest "$IT_DIR/*.md")
-IT_UNITS=0; IT_DECIDE=0; IT_AGE=""
-if [[ -n $IT_FILE ]]; then
-  IT_UNITS=$(grep -c '^  - order:' "$IT_FILE" 2>/dev/null || echo 0)
-  IT_DECIDE=$(grep -c 'disposition: NEEDS-DECISION' "$IT_FILE" 2>/dev/null || echo 0)
-  IT_AGE=$(age "$(mtime "$IT_FILE")")
+FO_DIR=".claude/tmp/fix-order"
+FO_FILE=$(newest "$FO_DIR/*.md")
+FO_UNITS=0; FO_DECIDE=0; FO_AGE=""; FO_STALE=0
+if [[ -n $FO_FILE ]]; then
+  m=$(mtime "$FO_FILE")
+  FO_UNITS=$(grep -c '^  - order:' "$FO_FILE" 2>/dev/null || echo 0)
+  FO_DECIDE=$(grep -c 'disposition: NEEDS-DECISION' "$FO_FILE" 2>/dev/null || echo 0)
+  FO_AGE=$(age "$m")
+  # An issue that changed after the snapshot (a decision answered, a summary or
+  # label added by /issue-triage, a new issue) makes the order out of date.
+  if [[ $HAS_GH -eq 1 ]]; then
+    last=$(jq -r 'map(.updatedAt) | sort | last // empty' < "$TMP/issues" 2>/dev/null)
+    if [[ -n $last ]]; then
+      e=$(iso_epoch "$last")
+      [[ -n $e && $e -gt $m ]] && FO_STALE=1
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------- stage 4: in flight
@@ -149,30 +169,41 @@ if [[ $HAS_GH -eq 1 ]]; then
     < "$TMP/prs" 2>/dev/null || echo 0)
 fi
 
-# Open issues with no branch and no PR naming them — the stage-4 backlog.
+# Open issues with no branch and no PR that closes them — the stage-4 backlog.
+# A branch counts when its name carries I<n> (Fix-I60-..., Fix-I11-I15-...). A PR
+# counts when it closes the issue, whatever its branch name, so a PR from
+# /implement-spec counts too. Issues with a deferral label are left out: /fix-order
+# and /work-issue exclude them, so they are not work that waits to start.
 UNSTARTED=0
 if [[ $HAS_GH -eq 1 ]]; then
-  allrefs=$(git branch -a 2>/dev/null; jq -r '.[].number' < "$TMP/prs" 2>/dev/null)
-  for n in $(jq -r '.[].number' < "$TMP/issues" 2>/dev/null); do
-    grep -qE "(^|-)I?${n}(-|$)" <<<"$allrefs" || UNSTARTED=$((UNSTARTED+1))
+  branches=$(git branch -a 2>/dev/null)
+  closed_by_pr=$(jq -r '.[].closingIssuesReferences[]?.number' < "$TMP/prs" 2>/dev/null)
+  for n in $(jq -r '
+      .[] | select(.labels | map(.name | ascii_downcase)
+                   | any(test("^(backlog|icebox|someday|someday-maybe|future|deferred|on hold|wontfix)$")
+                         or test("[/:] ?backlog$")) | not)
+          | .number' < "$TMP/issues" 2>/dev/null); do
+    grep -qE "(^|-)I${n}(-|$)" <<<"$branches" && continue
+    grep -qx "$n" <<<"$closed_by_pr" && continue
+    UNSTARTED=$((UNSTARTED+1))
   done
 fi
 
 # ---------------------------------------------------------------- stage 5: merge-order
 
-PT_DIR=".claude/tmp/merge-order"
-PT_FILE=$(newest "$PT_DIR/*.md")
-PT_COUNT=0; PT_AGE=""; PT_TOP=""; PT_STALE=0
-if [[ -n $PT_FILE ]]; then
-  m=$(mtime "$PT_FILE")
-  PT_COUNT=$(grep -c '^  - number:' "$PT_FILE" 2>/dev/null || echo 0)
-  PT_TOP=$(grep -m1 '^  - number:' "$PT_FILE" 2>/dev/null | tr -dc '0-9')
-  PT_AGE=$(age "$m")
+MO_DIR=".claude/tmp/merge-order"
+MO_FILE=$(newest "$MO_DIR/*.md")
+MO_COUNT=0; MO_AGE=""; MO_TOP=""; MO_STALE=0
+if [[ -n $MO_FILE ]]; then
+  m=$(mtime "$MO_FILE")
+  MO_COUNT=$(grep -c '^  - number:' "$MO_FILE" 2>/dev/null || echo 0)
+  MO_TOP=$(grep -m1 '^  - number:' "$MO_FILE" 2>/dev/null | tr -dc '0-9')
+  MO_AGE=$(age "$m")
   if [[ $HAS_GH -eq 1 ]]; then
     last=$(jq -r 'map(.mergedAt) | sort | last // empty' < "$TMP/merged" 2>/dev/null)
     if [[ -n $last ]]; then
       e=$(iso_epoch "$last")
-      [[ -n $e && $e -gt $m ]] && PT_STALE=1
+      [[ -n $e && $e -gt $m ]] && MO_STALE=1
     fi
   fi
 fi
@@ -214,7 +245,8 @@ next_step() {
     return
   fi
   if [[ ${#REVIEW_LINES[@]} -eq 0 && $ISSUES_OPEN -eq 0 ]]; then
-    echo "/project-review  —  nothing filed and no review to file from"; return
+    echo "/project-review  —  nothing filed and no review to file from"
+    echo "     (or, to build an idea: /grill-with-docs, then /to-spec and /to-tickets)"; return
   fi
   # A report far behind HEAD cites line numbers that have drifted. Filing from it
   # produces issues pointing at the wrong code, so re-review beats re-file.
@@ -226,28 +258,39 @@ next_step() {
     s=""; [[ $REVIEW_BEHIND -gt 0 ]] && s=" (report is $REVIEW_BEHIND commits behind; /make-issues will flag drifted findings)"
     echo "/make-issues  —  a review exists but no issues carry a source: label$s"; return
   fi
-  if [[ $IT_DECIDE -gt 0 ]]; then
-    echo "answer the $IT_DECIDE NEEDS-DECISION issue(s) in $IT_FILE, then re-run /fix-order"
+  # The gate comes before the order: /fix-order ranks an incomplete issue last and
+  # guesses nothing for it, so an order made first is an order made blind.
+  if [[ $ISSUES_INCOMPLETE -gt 0 ]]; then
+    echo "/issue-triage  —  $ISSUES_INCOMPLETE open issue(s) have no severity: or effort: label; /fix-order ranks them last until then"
+    return
+  fi
+  if [[ $FO_DECIDE -gt 0 && $FO_STALE -eq 1 ]]; then
+    echo "/fix-order  —  issues changed after the snapshot; re-run it before you act on its $FO_DECIDE NEEDS-DECISION"
+    return
+  fi
+  if [[ $FO_DECIDE -gt 0 ]]; then
+    echo "answer the $FO_DECIDE NEEDS-DECISION issue(s) in $FO_FILE, then re-run /fix-order"
     echo "     (/work-issue all halts on them until then)"; return
   fi
-  if [[ $ISSUES_OPEN -gt 0 && -z $IT_FILE ]]; then
+  if [[ $ISSUES_OPEN -gt 0 && -z $FO_FILE ]]; then
     echo "/fix-order  —  $ISSUES_OPEN open issues, never ordered"; return
   fi
   if [[ $UNSTARTED -gt 0 ]]; then
     echo "/work-issue all  —  $UNSTARTED open issue(s) with no branch or PR"; return
   fi
-  if [[ $PRS_OPEN -ge 2 && ( -z $PT_FILE || $PT_STALE -eq 1 ) ]]; then
-    echo "/merge-order  —  $PRS_OPEN PRs open, ${PT_FILE:+merge order is stale}${PT_FILE:-no merge order yet}"
+  if [[ $PRS_OPEN -ge 2 && ( -z $MO_FILE || $MO_STALE -eq 1 ) ]]; then
+    s="no merge order yet"; [[ -n $MO_FILE ]] && s="merge order is stale"
+    echo "/merge-order  —  $PRS_OPEN PRs open, $s"
     return
   fi
   if [[ ${RESTACK_NEEDED:-0} -gt 0 ]]; then
     echo "/work-issue restack  —  $RESTACK_NEEDED stacked PR(s) whose parent has merged need restacking before they can merge"
     return
   fi
-  if [[ $PRS_OPEN -ge 1 && -n $PT_TOP ]]; then
-    echo "review and merge #$PT_TOP, then re-run /merge-order  —  every merge invalidates the rest of the order"
-    [[ -z $(newest "docs/reviews/code-review_PR${PT_TOP}_*.md") ]] &&
-      echo "     (/code-review $PT_TOP for the line-level pass first — it has no review report yet)"
+  if [[ $PRS_OPEN -ge 1 && -n $MO_TOP ]]; then
+    echo "review and merge #$MO_TOP, then re-run /merge-order  —  every merge invalidates the rest of the order"
+    [[ -z $(newest "docs/reviews/code-review_PR${MO_TOP}_*.md") ]] &&
+      echo "     (/code-review $MO_TOP for the line-level pass first — it has no review report yet)"
     return
   fi
   if [[ $PRS_OPEN -eq 1 ]]; then
@@ -280,23 +323,25 @@ else
 fi
 
 if [[ $HAS_GH -eq 1 ]]; then
-  row 2 issues "$ISSUES_OPEN open  ·  $ISSUES_FROM_REVIEW from a review report"
+  s=""; [[ $ISSUES_INCOMPLETE -gt 0 ]] && s="  ·  $ISSUES_INCOMPLETE incomplete"
+  row 2 issues "$ISSUES_OPEN open  ·  $ISSUES_FROM_REVIEW from a review report$s"
 else
   row 2 issues "—"
 fi
 
-if [[ -n $IT_FILE ]]; then
-  d=""; [[ $IT_DECIDE -gt 0 ]] && d="  ·  $IT_DECIDE NEEDS-DECISION  <- blocked on you"
-  row 3 fix-order "$(basename "$IT_FILE")  $IT_AGE  ·  $IT_UNITS units$d"
+if [[ -n $FO_FILE ]]; then
+  d=""; [[ $FO_DECIDE -gt 0 ]] && d="  ·  $FO_DECIDE NEEDS-DECISION  <- blocked on you"
+  s=""; [[ $FO_STALE -eq 1 ]] && s="  [stale: an issue changed since]"
+  row 3 fix-order "$(basename "$FO_FILE")  $FO_AGE  ·  $FO_UNITS units$d$s"
 else
   row 3 fix-order "—"
 fi
 
 row 4 "in flight" "$BRANCHES branches  ·  $PRS_OPEN PRs open$( [[ $PRS_CONFLICT -gt 0 ]] && echo "  ·  $PRS_CONFLICT CONFLICTING" )"
 
-if [[ -n $PT_FILE ]]; then
-  s=""; [[ $PT_STALE -eq 1 ]] && s="  [stale: a PR merged since]"
-  row 5 "merge order" "$(basename "$PT_FILE")  $PT_AGE  ·  $PT_COUNT PRs$s"
+if [[ -n $MO_FILE ]]; then
+  s=""; [[ $MO_STALE -eq 1 ]] && s="  [stale: a PR merged since]"
+  row 5 "merge order" "$(basename "$MO_FILE")  $MO_AGE  ·  $MO_COUNT PRs$s"
 else
   row 5 "merge order" "—"
 fi

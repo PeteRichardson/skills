@@ -1,13 +1,13 @@
 ---
 name: pipeline
-description: Report where this repo stands in the review → issue → PR → merge pipeline and name the next command to run. Reads the artifacts each stage leaves behind (docs/reviews/, fingerprinted issues, .claude/tmp/ snapshots, Fix-I branches, open PRs) — there is no state file. Supports `/pipeline` (dashboard), `/pipeline next`, `/pipeline brief` (cheat sheet, no API calls), `/pipeline blocked` (only what needs a decision from you), and `/pipeline doc`. Use when the user types /pipeline, asks where they are in the workflow, what the next step is, or what's blocking them. Advisory only — it names commands and never runs a pipeline stage.
+description: Report where this repo stands in the review → issue → PR → merge pipeline and name the next command to run. Reads the artifacts each stage leaves behind (docs/reviews/, issue labels, .claude/tmp/ snapshots, Fix-I branches, open PRs and the issues they close) — there is no state file. Supports `/pipeline` (dashboard), `/pipeline next`, `/pipeline brief` (cheat sheet, no API calls), `/pipeline blocked` (only what needs a decision from you), and `/pipeline doc`. Use when the user types /pipeline, asks where they are in the workflow, what the next step is, or what's blocking them. Advisory only — it names commands and never runs a pipeline stage.
 disable-model-invocation: true
 ---
 
 # Pipeline
 
 A status skill for the six-stage workflow documented in `~/.claude/skills/WORKFLOW.md`:
-review → file → fix-order → work → merge-order → merge.
+review → file and complete → fix-order → work → merge-order → merge.
 
 It answers one question — *what do I type next?* — and it answers it from artifacts rather
 than from anything it remembers.
@@ -79,6 +79,8 @@ confirm counts the script already produced.
 
 | Dashboard shows | Read this | Report |
 |---|---|---|
+| `N incomplete` on stage 2 | Nothing extra | That `/issue-triage` comes before `/fix-order`. It is the gate for every issue, hand-filed or from `/to-tickets`, not only for `/make-issues`. The count checks only the `severity:` and `effort:` labels; `/issue-triage` also adds a fingerprint where one is missing |
+| `[stale]` on the fix-order snapshot | Nothing extra | That the snapshot is older than an issue change, so its dispositions may be out of date. `/work-issue all` does not care — it orders its queue fresh — but a `NEEDS-DECISION` that the user has answered still shows here until `/fix-order` runs again |
 | `N NEEDS-DECISION` | The `Decisions needed` section of the newest `.claude/tmp/fix-order/*.md` | The actual question and the options the issue named — answerable without opening GitHub. Mention `/fix-order label` if the issues don't already carry `status: needs-decision`, but never run it: it mutates GitHub |
 | A fix-order snapshot exists | Its `Proposed deferrals` / `Proposed closures` sections | Standing proposals, flagged as awaiting the user's call. Never as blockers |
 | `N CONFLICTING` PRs | `gh pr list --json number,title,mergeable` | Which PRs need author action regardless of queue position |
@@ -97,9 +99,6 @@ and add the one-sentence reason only if it isn't obvious from the dashboard.
 
 Override the script's cascade in exactly these cases, and say why when you do:
 
-* **It recommends `/work-issue all` but the fix-order snapshot is older than the newest issue
-  update** — recommend re-running `/fix-order` first. Its ordering is computed against a
-  queue that has since changed.
 * **It recommends `/make-issues` but no review report is fresh enough to file from** — the
   script only checks `PROJECT_REVIEW.md`'s commit drift. If the only report is a
   `/code-review` of a scope that has since been rewritten, say so.
@@ -171,7 +170,7 @@ alias ps6n='~/.claude/skills/pipeline/pipeline-status -b'
   greep  (main)
 
   1 review      PROJECT_REVIEW.md  41m ago  ·  1 commits since  [stale]
-  2 issues      34 open  ·  34 from a review report
+  2 issues      36 open  ·  34 from a review report
   3 fix-order   FIX_ORDER.md  14m ago  ·  18 units  ·  2 NEEDS-DECISION  <- blocked on you
   4 in flight   1 branches  ·  0 PRs open
   5 merge order —
@@ -188,7 +187,7 @@ decisions actually are.
 
 Every alternative design started with "track which stage the user is on," and every one of
 them breaks on the first merge done in a browser tab. The artifacts are already a complete
-record — `docs/reviews/` for stage 1, `source:` labels and fingerprint markers for stage 2,
+record — `docs/reviews/` for stage 1, `source:`, `severity:` and `effort:` labels for stage 2,
 `.claude/tmp/*/` snapshots for stages 3 and 5, `Fix-I<n>` branches for stage 4, merged PRs
 for stage 6 — and unlike a tracker they're written by the stages themselves, so they can't
 disagree with reality.
@@ -228,8 +227,13 @@ positional ones ("where am I", "what's next") — not to have both claim the sam
   path right and is deliberately overridable by the skill (Phase 3).
 - Review staleness is measured in commits since the report was written, which over-reports
   on repos with churny docs or config. Phase 2 exists partly to correct for that.
-- Stage-4 coverage is inferred from branch names matching `Fix-I<n>`. Work done on a branch
-  that doesn't follow `/work-issue`'s naming is invisible to it.
+- Stage-4 coverage comes from branch names that carry `I<n>` (`/work-issue`'s naming) and
+  from open PRs that close the issue. Work on another branch, with no open PR that says
+  `Fixes #<n>`, is invisible to it — for example an `/implement-spec` integration branch
+  before its PR opens.
+- Stage-2 completeness checks only the `severity:` and `effort:` labels. A missing fingerprint
+  is in a comment, and one `gh` call per issue is too slow for a dashboard. `/issue-triage`
+  and `/fix-order` both check the fingerprint themselves.
 - `-n`/offline mode can't see issues or PRs at all, so it reports stages 2, 4 (PRs), 5's
   staleness, and 6 as unknown. That's honest, but it means the next-step recommendation is
   much weaker offline.

@@ -7,16 +7,43 @@ comes next and why.
 The pipeline runs on a GitHub-backed repo. Stages 2–5 need `gh` authenticated
 (`gh auth status`); stage 1 and the inner loop work anywhere.
 
+Work comes in from three sources — a review, a spec, or a person — and every issue passes
+through one gate, `/issue-triage`, before anything ranks it:
+
+```
+            Source code
+           /           \
+  /project-review    /code-review  ──(engine: ocr, native, or matt)
+           \               |
+  you ──► /grill-with-docs ──► spec
+   |           \               |
+   |            /make-issues  or  /to-spec + /to-tickets
+   |                   |
+   └──(by hand)──►  ISSUES  ◄──►  /issue-triage   (summary, labels, fingerprint; --verify)
+                       |
+                       ├──►  /fix-order   ──►  .claude/tmp/fix-order/FIX_ORDER.md
+                       ▼
+          /work-issue (one issue or one group → one PR)
+          /implement-spec (one big spec → one integration branch)
+                       |
+                       ▼
+                      PRs  ──►  /code-review <pr>  (findings go back to ISSUES)
+                       |
+                       ├──►  /merge-order ──►  .claude/tmp/merge-order/MERGE_ORDER.md
+                       ▼
+                     merge (manual)
+```
+
 ---
 
 ## At a glance
 
 | # | Stage | Command | Produces | Durable trace it leaves |
 |---|-------|---------|----------|-------------------------|
-| 1 | Find the work | `/project-review` and/or `/code-review <scope>` | Findings with `file:line`, severity, effort | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
-| 2 | File the work | `/make-issues [--all]` | GitHub issues, labelled + fingerprinted | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:`/`source:` labels |
+| 1 | Find the work | `/project-review` and/or `/code-review <scope>` — or, from an idea, `/grill-with-docs` → `/to-spec` | Findings with `file:line`, severity, effort — or a spec | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
+| 2 | File and complete the work | `/make-issues [--all]`, `/to-tickets`, or by hand — then `/issue-triage` | Complete GitHub issues: summary, labels, fingerprint | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:` labels (`source:` when a review filed them) |
 | 3 | Decide what to work | `/fix-order` | Disposition per issue + ordered work units | `.claude/tmp/fix-order/FIX_ORDER.md` |
-| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`) | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (one name, local and remote), open PRs, a resolution comment per issue |
+| 4 | Do the work | `/work-issue all` (or `/work-issue <n>`); `/implement-spec` for one big spec | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (one name, local and remote), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/merge-order` | `/fix-order`'s PR order, with ready / stack / rebase / next action per PR | `.claude/tmp/merge-order/MERGE_ORDER.md` |
 | 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
 
@@ -102,7 +129,11 @@ history so a deleted `PROJECT_REVIEW.md` can't cause an ID collision with issues
 **Also useful here:** `/add-tests` (coverage gaps on recent changes) and `/update-docs`
 (doc drift) surface work the review tools don't frame as findings.
 
-## Stage 2 — File the work
+**From an idea, not from code.** Matt Pocock's `/grill-with-docs` questions a plan until it is
+clear, `/to-spec` writes it as a spec, and `/to-tickets` files the spec as issues. Those issues
+join the same queue at stage 2. See [Where Matt Pocock's skills fit](#where-matt-pococks-skills-fit).
+
+## Stage 2 — File and complete the work
 
 ```
 /make-issues                       # PROJECT_REVIEW.md, Medium+ severity only
@@ -118,7 +149,10 @@ keyword overlap. Above ~20% overlap it pauses and asks; below that it just creat
 calls `/issue-triage` on the new issues, which adds the summary and any missing labels.
 
 `/issue-triage` is the gate for **every** issue: from `/make-issues`, from `/to-spec` or
-`/to-tickets`, or filed by hand. Run it after you file an issue by hand. It adds the
+`/to-tickets`, or filed by hand. Run it after you file an issue by hand, and after
+`/to-tickets`. It leaves Matt's `ready-for-agent` label alone and adds only what is missing.
+`/pipeline` counts an open issue with no `severity:` or `effort:` label as incomplete, and
+names `/issue-triage` as the next step until there are none. It adds the
 fingerprint as a *comment* (never a body edit) so the issue takes part in future dedup — and,
 more importantly, so stage 3 can see its `file:` field. `/issue-triage --verify` also
 reproduces each issue once and records the steps in it (opt-in).
@@ -203,6 +237,13 @@ already contains the parent's fix instead of against a base that predates it.
 This costs no wall-clock: batch mode was already sequential, so the parent's branch always
 existed by the time the child started — it was simply being ignored. Chains cap at 3; a 4th
 overlapping unit is `HOLD`, reported for the next batch.
+
+**A big spec goes another way.** When `/to-tickets` filed a spec as several tickets that
+build on each other, Matt's `/implement-spec` takes the spec and its tickets to one
+integration branch. It does not need `/fix-order`: the tickets' blocking edges already set
+the order. On GitHub it opens a draft PR that closes the spec and its tickets, so `/pipeline`
+sees them as started once that PR is open. It ends with `/code-review` on the integration
+branch, which runs this repo's skill in change mode.
 
 **Every issue also gets a resolution comment** once its PR is open — diagnosis, what the PR
 proposes for *that issue specifically*, what you'd notice if it merges, and what was left out.
@@ -315,7 +356,15 @@ whose queue has entirely resolved shows up as fully closed rather than as pendin
 report, use the inner loop. The finding ID stays useful in commit messages.
 
 **One known bug, no review.** File the issue by hand (`gh issue create`), then
-`/work-issue <n>`. Skip stages 1, 2, 3, 5. The branch just has no `F<n>` segment.
+`/issue-triage #<n>`, then `/work-issue <n>`. Skip stages 1, 3, 5. `/issue-triage` adds the
+labels and the fingerprint, so a later `/fix-order` sees the issue's files. Add `--verify`
+when you want the steps to reproduce recorded in the issue: `/work-issue` then uses them as
+its first failing test. The branch has no `F<n>` segment.
+
+**A spec, not a review.** `/grill-with-docs` → `/to-spec` → `/to-tickets` →
+`/issue-triage`. Then either `/implement-spec` (the tickets build on each other: one
+integration branch) or `/fix-order` and `/work-issue` (the tickets are independent). Stage 5
+onward as normal.
 
 **Language-learning sprint.** `/code-review src/ --focus idiom` → `/make-issues <report>` →
 stage 3 onward as normal. IDIOM findings carry a derived severity so they order alongside
@@ -337,6 +386,27 @@ is a convenience, not a commitment.
 
 ---
 
+## Where Matt Pocock's skills fit
+
+Matt Pocock's skills are installed beside these (`npx skills`, and the `mattpocock-skills:`
+plugin). **No skill here edits his, copies his text, or depends on his wording.** He updates
+them often, and an update must need no follow-up edit here. They fit at these points:
+
+| His skill | Where | How it joins |
+|---|---|---|
+| `/grill-with-docs`, `/to-spec`, `/to-tickets` | Stage 1–2, from an idea | Their issues go through `/issue-triage` like any other. It leaves `ready-for-agent` alone |
+| `/implement-spec` | Stage 4, one big spec | One integration branch instead of `/work-issue`'s one PR per unit |
+| `/implement` | Inside a branch | Small work on the current branch. It calls `/code-review` by name, which runs this repo's skill in change mode |
+| `mattpocock-skills:code-review` | Stage 1 or 6 | An engine of `/code-review` (`--engine matt`): its Standards + Spec check, in this repo's report format |
+| `/triage` | Off the main path | Type `/triage #n` by hand for its full one-issue treatment (questions, grilling, an agent brief). Not the same job as `/issue-triage`, which only completes issues |
+
+`/to-spec` and `/to-tickets` need `docs/agents/triage-labels.md` in each repo; keep it.
+
+If his skills change a lot — `/implement` stops calling `code-review`, or `/to-tickets` changes
+its labels — check this table. Nothing here breaks, but the fit can change.
+
+---
+
 ## What the pipeline deliberately won't do
 
 Each of these is a decision that belongs to you, and every skill involved is written to
@@ -345,9 +415,11 @@ surface it rather than take it:
 - **Merge anything.** `/merge-order` is advisory, full stop.
 - **Say anything on your behalf on a PR.** `/code-review <pr>` writes a local report and
   stops — no review comment, no requested changes, no approval. Publishing a review is your
-  call. The pipeline's complete set of GitHub writes stays: `/make-issues` (issues and
-  fingerprint comments), `/fix-order label` (one label, opt-in), and `/work-issue`
-  (branch, PR, per-issue resolution comment).
+  call. The pipeline's complete set of GitHub writes stays: `/make-issues` (issues),
+  `/issue-triage` (fingerprint and verification comments, labels in empty namespaces, and a
+  summary at the top of a body that has none — all after one confirmation),
+  `/fix-order label` (one label, opt-in), and `/work-issue` (branch, PR, per-issue
+  resolution comment).
 - **Close or defer an issue.** `/fix-order` proposes `CLOSE-MOOT` and `DEFER`; it never
   applies a `backlog` label or closes anything, and `/work-issue` won't act on those
   proposals either. `/fix-order label` is the one sanctioned mutation, and it touches

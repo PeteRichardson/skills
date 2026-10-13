@@ -271,11 +271,18 @@ repo's own, so his updates never conflict with it.
 
 ## Next in the pipeline
 
-End the run with the next step as the last line:
+This skill is the gate at the end of stage 2 of the review → issue → PR → merge pipeline
+(`~/.claude/skills/WORKFLOW.md`). End the run with the next step as the last line:
 
 > Next: `/fix-order` to decide what to fix first, and what to fix together.
 
-When `/make-issues` called this skill, leave the "Next" line to `/make-issues`.
+Vary it only for these cases:
+
+* **`/make-issues` called this skill** — print no "Next" line. `/make-issues` prints it.
+* **One issue in scope, and no other open issue or open PR shares a file with it** — say that
+  `/fix-order` is optional and `/work-issue <n>` is the direct path. Name the real number.
+* **A `--verify` result is `not-enough-detail` or `not-reproduced`** — the questions in the
+  issue come first. Name the issue; `/fix-order` shows it as `NEEDS-DECISION` until then.
 
 ## Rules
 
