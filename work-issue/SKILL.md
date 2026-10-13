@@ -186,7 +186,7 @@ The worktree directory takes the branch name.
 
 ## Phase 4: Do the work
 
-This skill owns the lifecycle, not the engineering. Use the normal skills inside the worktree: `/tdd` for the change itself, `/run-tests` to verify, `/pre-commit` before committing, `/commit-message` for the message. Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it for linking).
+This skill owns the lifecycle, not the engineering. Use the normal skills inside the worktree: `/tdd` for the change itself, `/run-tests` to verify, `/simplify` on the changed code once the tests pass (then `/run-tests` again if it changed anything), `/pre-commit` before committing, `/commit-message` for the message. Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it for linking).
 
 **When Phase 1 found a `confirmed` verification**, its **Steps to reproduce** are the first failing test. Write them as a test, see it fail for the reason the comment gives, then fix. Start reading the code at its **Code path**. If the test does not fail, the code has changed since the verification `sha:` — say so, and ask before going on, rather than writing a fix for a bug you cannot see.
 
