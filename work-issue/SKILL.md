@@ -186,7 +186,17 @@ The worktree directory takes the branch name.
 
 ## Phase 4: Do the work
 
-This skill owns the lifecycle, not the engineering. Use the normal skills inside the worktree: `/tdd` for the change itself, `/run-tests` to verify, `/simplify` on the changed code once the tests pass (then `/run-tests` again if it changed anything), `/pre-commit` before committing, `/commit-message` for the message. Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it for linking).
+This skill owns the lifecycle, not the engineering. The engineering is a checklist of skills, run inside the worktree, in this order:
+
+1. `/tdd` — the change itself.
+2. `/run-tests` — verify.
+3. `/simplify` — on the changed code once the tests pass; then `/run-tests` again if it changed anything.
+4. `/pre-commit` — before committing.
+5. `/commit-message` — the message.
+
+Each item is done when its **Skill tool call** is in the transcript. The same work done by hand (running the test command, reading the diff) is legwork inside a step, and the item stays open: the skill carries passes the hand version skips. Phase 6 reports each item, so a skip is visible to the user at once. A `PreToolUse` hook (`~/.claude/hooks/require-simplify-before-pr.py`) refuses `gh pr create` until `/simplify` has run since the run started or since the last PR; a refusal from it means item 3 is still open.
+
+Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it for linking).
 
 **When Phase 1 found a `confirmed` verification**, its **Steps to reproduce** are the first failing test. Write them as a test, see it fail for the reason the comment gives, then fix. Start reading the code at its **Code path**. If the test does not fail, the code has changed since the verification `sha:` — say so, and ask before going on, rather than writing a fix for a bug you cannot see.
 
@@ -236,7 +246,7 @@ If the issue needs design decisions the issue text doesn't settle, ask before im
    If any check fails, **keep the worktree**, print its absolute path and which check failed, and say the tree is still live. Never `git worktree remove --force`.
 3. `git worktree remove .worktrees/<branch>`.
 4. **Keep the local branch**, under its one name. It is what you come back to if the PR needs more work.
-5. Report: issue number and title, PR number and URL, the branch name, whether the resolution comment was posted for each issue (and why not, if not), and whether the worktree was removed or kept (and why).
+5. Report: issue number and title, PR number and URL, the branch name, each Phase 4 checklist item as run or skipped (with the reason for a skip), whether the resolution comment was posted for each issue (and why not, if not), and whether the worktree was removed or kept (and why).
 
 ## Coming back to a PR later
 
