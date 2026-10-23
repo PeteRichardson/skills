@@ -16,7 +16,8 @@ When invoked via `/issue-triage`, follow the protocol below. Everything from her
 `---` divider is the protocol to execute. The section after the divider is documentation for
 humans.
 
-Design: `docs/specs/2026-10-12-unified-issue-workflow-design.md` (D2) in this repo.
+Design: `docs/specs/2026-10-12-unified-issue-workflow-design.md` (D2) in the skills repo —
+this skill's own repo, not the repo under review.
 
 ---
 
@@ -117,7 +118,10 @@ one.
 
 ### Summary format
 
-The format of the user's global `CLAUDE.md` "GitHub issues" rule, at the very top of the body:
+At the very top of the body. **This section is canonical for the format.** Each repo's
+`docs/agents/issue-tracker.md` ("Issue body shape") and the global `AGENTS.md` /
+`CLAUDE.md` restate it, so an issue is filed in this shape whatever filed it and
+`/issue-triage` has nothing to add:
 
 ```markdown
 > **SUMMARY:** One or two sentences about the effect on the user.
@@ -161,7 +165,10 @@ keywords: <comma-separated>
 
 - fingerprint: present if the marker is in the body or in any comment,
 - labels per namespace (`severity:`, `category:`, `effort:`, `source:`),
-- summary: present if the body contains `**SUMMARY:**`, wherever it sits and whoever wrote it,
+- summary: present if the body contains `**SUMMARY:**`, wherever it sits and whoever wrote it.
+  A body that opens with a `## Summary` **section** and has no marker has *prose but no
+  marker*: report it as `summary: prose, marker missing` and take it to Phase 4 for
+  conversion. Never stack a second summary block above it,
 - verification: present if any comment contains `<!-- issue-verification`.
 
 An issue that has everything is done. List it once as complete and skip it.
@@ -207,8 +214,13 @@ where the issue has no label yet. Labels a person already applied stay exactly a
 
 A summary is **added, never rewritten**: a person may have curated an existing one.
 
-1. Scope: the issues with no `**SUMMARY:**` in the body.
+1. Scope: the issues with no `**SUMMARY:**` in the body — including Phase 1's
+   `prose, marker missing` ones.
 2. Draft each one per "Summary format", from the title, body and comments.
+3. **Convert, do not stack.** Where the body already opens with a `## Summary` section,
+   replace that heading line with the marker block and keep every byte of prose below it:
+   the heading goes, the words stay. A draft that repeats that prose as a second summary is
+   wrong. Where there is no such section, the marker block is prepended.
 
 ## Confirm and apply
 
@@ -219,8 +231,10 @@ A summary is **added, never rewritten**: a person may have curated an existing o
 3. **Labels** — seed per "Labels", then `gh issue edit <n> --add-label ...`.
 4. **Summaries** — fetch the body again just before the write. If it changed since the draft, or
    it now contains `**SUMMARY:**`, skip that issue and say so. Otherwise write the summary
-   block, a blank line, then the fetched body byte for byte (`gh issue edit <n> --body-file
-   <file>`, so no shell quoting touches it).
+   block, a blank line, then the fetched body byte for byte. On a conversion (Phase 4 step 3)
+   the only change to the fetched body is its `## Summary` heading line replaced by the marker
+   block and a `---`; every other byte is the fetched body. Both go through
+   `gh issue edit <n> --body-file <file>`, so no shell quoting touches it.
 
 ## Phase 5: Verify (only with `--verify` or `--reverify`)
 
@@ -266,7 +280,8 @@ repo's own, so his updates never conflict with it.
 - Issues complete before the run, and issues changed.
 - Count per label namespace, issues left with an empty namespace, any new category minted.
 - **Disagreements** — the Phase 3 step 2 lines, or "none".
-- Summaries added, and issues skipped because their body changed.
+- Summaries added, summaries converted from a `## Summary` heading, and issues skipped because
+  their body changed.
 - With `--verify`: each issue and its result.
 
 ## Next in the pipeline
@@ -286,8 +301,9 @@ Vary it only for these cases:
 
 ## Rules
 
-- Never edit an issue body, except to prepend a confirmed summary to a body that has none.
-  Every other byte stays as it was.
+- Never edit an issue body, except to prepend a confirmed summary to a body that has none, or
+  to convert a confirmed leading `## Summary` heading into the marker (Phase 4 step 3: the
+  heading goes, every other byte stays as it was).
 - Never remove or change a label. Add only into an empty namespace, only after the user confirms.
 - Never apply `status:` or any label of Matt Pocock's skills (`ready-for-agent`, `needs-triage`,
   `bug`, `enhancement`, …).

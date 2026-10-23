@@ -151,6 +151,10 @@ calls `/issue-triage` on the new issues, which adds the summary and any missing 
 `/issue-triage` is the gate for **every** issue: from `/make-issues`, from `/to-spec` or
 `/to-tickets`, or filed by hand. Run it after you file an issue by hand, and after
 `/to-tickets`. It leaves Matt's `ready-for-agent` label alone and adds only what is missing.
+The summary marker it writes — `> **SUMMARY:**` at the very top of the body — is one shape,
+owned by `/issue-triage` and restated in each repo's `docs/agents/issue-tracker.md` so an
+issue is filed that way whatever files it; a body that instead opens with a `## Summary`
+section gets the heading converted, not a second summary stacked above it.
 `/pipeline` counts an open issue with no `severity:` or `effort:` label as incomplete, and
 names `/issue-triage` as the next step until there are none. It adds the
 fingerprint as a *comment* (never a body edit) so the issue takes part in future dedup — and,
@@ -417,7 +421,8 @@ surface it rather than take it:
   stops — no review comment, no requested changes, no approval. Publishing a review is your
   call. The pipeline's complete set of GitHub writes stays: `/make-issues` (issues),
   `/issue-triage` (fingerprint and verification comments, labels in empty namespaces, and a
-  summary at the top of a body that has none — all after one confirmation),
+  summary at the top of a body that has none — or its leading `## Summary` heading converted
+  to the marker — all after one confirmation),
   `/fix-order label` (one label, opt-in), and `/work-issue` (branch, PR, per-issue
   resolution comment).
 - **Close or defer an issue.** `/fix-order` proposes `CLOSE-MOOT` and `DEFER`; it never
