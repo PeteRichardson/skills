@@ -1,6 +1,14 @@
 ---
 name: merge-order
-description: Show the open PRs in merge order, with what you need while merging — one line per PR: is it ready (CI, review, draft, conflicts), is it blocked by a stack parent or waiting for a restack, is a rebase likely after an earlier merge, and the next action (merge, restack, rebase, wait). The order itself comes from /fix-order's PR order (it runs that protocol fresh); this skill never makes its own. Writes a snapshot under .claude/tmp/merge-order/. Supports `/merge-order list`, `/merge-order open`, and `/merge-order clean` [--all]. Use when the user has open PRs and asks which to merge first, what is ready to merge, or what to do next with the PR queue. Formerly /pr-triage. Advisory only — never merges, pushes, or rebases.
+description: >-
+  Show the open PRs in merge order, with what you need while merging — one line per PR: is it ready
+  (CI, review, draft, conflicts), is it blocked by a stack parent or waiting for a restack, is a
+  rebase likely after an earlier merge, and the next action (merge, restack, rebase, wait). The
+  order itself comes from /fix-order's PR order (it runs that protocol fresh); this skill never
+  makes its own. Writes a snapshot under .claude/tmp/merge-order/. Supports `/merge-order list`,
+  `/merge-order open`, and `/merge-order clean` [--all]. Use when the user has open PRs and asks
+  which to merge first, what is ready to merge, or what to do next with the PR queue. Formerly
+  /pr-triage. Advisory only — never merges, pushes, or rebases.
 disable-model-invocation: true
 ---
 

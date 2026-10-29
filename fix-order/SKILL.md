@@ -1,6 +1,17 @@
 ---
 name: fix-order
-description: Assess a set of open GitHub issues, together with the open PRs, and recommend what to work, in what order, what to combine into a single PR, what to close as moot, and what needs a human decision first. Needs only the issues and PRs — no review report. Produces a scoped snapshot under .claude/tmp/fix-order/ with a relationship graph (file/symbol overlap with other issues and with open PRs, declared dependencies, supersession), a disposition per issue (including stacked and held units), an ordered work plan ranked by dependency, severity, blast radius, then effort, and a merge order for the open PRs (stacks, critical tier, blast radius). It is the one source of order: /merge-order reads its PR order. Reads /issue-triage's verification results. Supports `/fix-order list`, `/fix-order open`, `/fix-order clean` [--all], and `/fix-order label` to sync a `status: needs-decision` label onto GitHub for UI visibility. Its Phases 1.5-5, including Phase 4.5, are also run as a sub-protocol by `/work-issue` batch mode to order its queue. Use when the user has several open issues and asks which to fix first, how to order the backlog, or to prioritize the issue queue. A fix-order run creates, closes, and modifies nothing — advisory only; `label` is the sole mutation and touches one label after confirmation.
+description: >-
+  Assess a set of open GitHub issues, together with the open PRs, and recommend what to work, in
+  what order, what to combine into a single PR, what to close as moot, and what needs a human
+  decision first. Needs only the issues and PRs — no review report. Produces a relationship graph
+  (file/symbol overlap, declared dependencies, supersession), a disposition per issue, an ordered
+  work plan ranked by dependency, severity, blast radius, then effort, and a merge order for the
+  open PRs. It is the one source of order: /merge-order reads its PR order, and /work-issue batch
+  mode runs this protocol to order its queue. Subcommands: `list`, `open`, `clean` [--all], and
+  `label`, which puts a `status: needs-decision` label on GitHub for UI visibility. Use when the
+  user has several open issues and asks which to fix first, how to order the backlog, or to
+  prioritize the issue queue. Advisory only — creates, closes and modifies nothing; `label` is the
+  sole mutation, and it asks first.
 disable-model-invocation: true
 ---
 
