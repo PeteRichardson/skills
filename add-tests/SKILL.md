@@ -26,10 +26,16 @@ cat setup.cfg 2>/dev/null | grep -A5 '\[tool:pytest\]'
 **Rust:** Tests live in inline `#[cfg(test)]` modules within the source
 file, and/or in `tests/` as integration tests. Framework: `cargo test`.
 
-**Swift:** Tests live in a `*Tests` target, typically `Tests/` or
-`*Tests/` directory. Framework: XCTest (or Swift Testing for newer
-projects — check for `import Testing`). Run via `swift test` (SPM) or
-`xcodebuild test`.
+**Swift:** Tests live in a separate test target (`*Tests`, typically a
+`Tests/` or `*Tests/` directory), never in the source file. Framework:
+Swift Testing (`import Testing`) is the default for new tests; use XCTest
+only when the target already uses it. UI tests use XCUIAutomation in a
+UI-testing target. Run via `swift test` (SPM) or `/run-tests` (Xcode).
+
+For an Xcode project with the xcode-tools MCP available, list targets with
+`XcodeListTargets` — test targets have `isTestTarget: true`. A project can
+have **no test target at all**; that is a gap to propose in Step 5, not a
+reason to stop.
 
 **Python:** Tests live in `tests/` or alongside source as `test_*.py`.
 Framework: pytest (preferred), unittest. Run via `pytest`.
@@ -60,6 +66,8 @@ find . -path "*/tests/*.rs" 2>/dev/null
 
 # Swift
 find . -name "*Tests.swift" -o -name "*Spec.swift" 2>/dev/null | grep -v .git
+grep -rlE '^import (Testing|XCTest)' --include='*.swift' . 2>/dev/null
+# Xcode + MCP: GetTestList lists every test with its file path
 
 # Python
 find . -name "test_*.py" -o -name "*_test.py" 2>/dev/null | grep -v .git
@@ -89,14 +97,38 @@ needs three test cases, not one.
 - Generated or derived code
 - Code the developer has already indicated they don't want tested
 
+**Swift: testability.** A test target sees only `internal` and `public`
+declarations, through `@testable import <Module>`. `private` and
+`fileprivate` code is reachable only through the types that use it. Logic
+inside a SwiftUI `View` body, an `SKScene` subclass, or an app delegate is
+hard to test directly; when the important behavior is there, say so in the
+proposal and test the plain types it calls instead. Don't propose moving
+code just to make it testable — that is a refactor for the user to decide.
+
 ---
 
 ## Step 5: Propose the test plan
 
-Present a structured proposal. For each proposed test:
+Present a structured proposal.
+
+**No test target yet (Swift/Xcode).** Put this first in the proposal, as
+its own approvable item:
 
 ```
-### `test_name` (or func testName / def test_name)
+### New test target: `<AppTarget>Tests`
+**Template:** unit-test bundle, testing system Swift Testing
+**Host:** <AppTarget> (so `@testable import <AppModule>` works)
+**Why:** the project has no test target, so no test below can run without it
+```
+
+Find the template identifier and its options with `XcodeListTemplates`.
+If the user rejects the target, none of the Swift tests can be written —
+say so rather than writing them somewhere else.
+
+For each proposed test:
+
+```
+### `test_name` (or @Test func testName / func testName / def test_name)
 **What it tests:** [the specific behavior or invariant]
 **Setup:** [inputs, state, or fixtures needed]
 **Assert:** [what the test checks]
@@ -134,9 +166,28 @@ source file, or create `tests/test_name.rs` for integration tests.
 Follow the project's existing style — if tests use `assert_eq!` and
 descriptive names, match that.
 
-**Swift:** Add test methods to the appropriate `*Tests` class. Use
-`XCTAssertEqual`, `XCTAssertThrowsError`, etc. For Swift Testing,
-use `#expect` and `#require`. Match existing naming style.
+**Swift:** If a new test target was approved, create it first with
+`XcodeNewTarget` (xcode-tools MCP), then confirm it appears in
+`XcodeListTargets`. Without the MCP, tell the user to add it in Xcode
+(File ▸ New ▸ Target ▸ Unit Testing Bundle) and stop until it exists —
+don't hand-edit `project.pbxproj`.
+
+- **Swift Testing** (default): `@Test` functions, grouped in a `struct`
+  (optionally `@Suite("…")`), not a class. Assert with `#expect(...)`; use
+  `try #require(...)` to unwrap or to stop when a precondition fails. Use
+  `@Test(arguments: [...])` in place of copy-pasted cases, and
+  `#expect(throws: SomeError.self) { ... }` for errors. Put shared setup in
+  the struct's `init`. Mark a suite `@MainActor` when it touches
+  main-actor types (SwiftUI views, `SKScene`).
+- **XCTest** (only where the target already uses it): methods on an
+  `XCTestCase` subclass, `XCTAssertEqual`, `XCTAssertThrowsError`, etc.
+- **UI tests**: XCUIAutomation in a UI-testing target, only when the
+  behavior can't be reached below the UI.
+
+For randomness (e.g. a random generator or distribution), inject a seeded
+generator if the code already accepts one; otherwise assert on properties
+that hold for every value (ranges, invariants), not on exact values. Match
+existing naming style.
 
 **Python:** Add functions to the appropriate `test_*.py` file. Use
 `assert` statements or `pytest.raises` for exceptions. Use fixtures
@@ -158,6 +209,7 @@ After writing:
 
 - Don't write any tests before the user approves the proposal
 - Don't propose tests for every conceivable input — focus on meaningful behavior
-- Don't invent test infrastructure that doesn't exist in the project
+- Don't invent test infrastructure that doesn't exist in the project —
+  the one exception is a test target the user approved in Step 5
 - Don't write tests that test the language or framework, not the code
 - Don't exceed the scope of what changed in this diff

@@ -45,6 +45,15 @@ Inform the user:
 > `git stash pop` to restore your changes. Stash will be named
 > `pre-commit-isolation`.
 
+**Xcode projects:** if the stash would include anything under
+`*.xcodeproj/` or `*.xcworkspace/` (check `git diff --name-only`), Xcode
+reloads the project from disk when it changes under it, and can write its
+in-memory copy back over the restored file. Add to the message above:
+
+> ⚠️ The stash includes Xcode project files (`project.pbxproj`). If Xcode
+> asks whether to keep its version or revert to the version on disk,
+> choose **Revert** — after the stash is popped, the disk version is yours.
+
 Then stash:
 
 ```bash
@@ -92,7 +101,13 @@ source files. Flag any source file with no apparent test coverage.
 Tests exist:  ✅ coverage apparent for all changed files
               ⚠️  no coverage found for: foo.rs, bar.rs
                   → run /add-tests to plan and write them
+              ⚠️  no test target in the project
+                  → run /add-tests to propose one
 ```
+
+Changes to non-code files only (asset catalogs, `.xcstrings`,
+entitlements, `project.pbxproj` alone) need no test coverage — don't flag
+them.
 
 ---
 
@@ -105,7 +120,11 @@ Run once. Report pass or fail.
 Tests pass:   ✅ 42 passed, 0 failed
               ❌ 4 failing — run /run-tests to diagnose
               ⚠️  skipped (build error) — run /run-tests to diagnose
+              ⚠️  skipped (no test target) — run /add-tests
 ```
+
+A project that builds but has no tests is ⚠️, never ✅. For an Xcode
+project, a green build is not a green test run.
 
 ---
 

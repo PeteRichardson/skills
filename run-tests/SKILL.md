@@ -29,8 +29,34 @@ ls Makefile 2>/dev/null && grep "^test:" Makefile 2>/dev/null
 **Swift (SPM):** `swift test`
 - For a specific target: `swift test --filter <TestTargetName>`
 
-**Swift (Xcode):** `xcodebuild test -scheme <SchemeName> -destination 'platform=macOS'`
-- Read the scheme name from the `.xcodeproj` or ask the user if ambiguous
+**Swift (Xcode), xcode-tools MCP available** (Claude is running inside
+Xcode, or the `xcode-tools` MCP server is connected): prefer the MCP tools
+over `xcodebuild`. They use the scheme, test plan, and run destination the
+user has selected in Xcode, and return structured results.
+- `XcodeListTargets` first. If no target has `isTestTarget: true`, there is
+  nothing to run — report `Tests: ⚠️ no test target` (see Step 3) and
+  suggest `/add-tests`, which can propose one. Don't report this as a
+  build failure.
+- All tests: `RunAllTests`
+- Tests related to changed files: `GetTestList`, grep its
+  `fullTestListPath` file for `TEST_FILE_PATH` matching the changed test
+  files (or test names matching the changed types), then `RunSomeTests`
+  with those `targetName` / `testIdentifier` pairs. Best effort — fall
+  back to `RunAllTests`.
+- If the build fails before tests run, get the errors with
+  `XcodeListNavigatorIssues` (or `GetBuildLog`) and show them.
+
+**Swift (Xcode), no MCP:**
+`xcodebuild test -scheme <SchemeName> -destination 'platform=macOS'`
+- List schemes with `xcodebuild -list`; ask the user if more than one could
+  hold the tests
+- Pick the destination from the target's platform — an iOS app needs
+  `-destination 'platform=iOS Simulator,name=<device>'`
+  (`xcrun simctl list devices available` lists the simulators)
+- If the scheme has no test action, `xcodebuild` fails with "Scheme X is
+  not currently configured for the test action" — report that as "no test
+  target", not as a test failure
+- Run only some tests with `-only-testing:<Target>/<Suite>/<test>`
 
 **Python:** `pytest` (preferred) or `python -m pytest`
 - For changed files only: `pytest tests/test_foo.py tests/test_bar.py`
@@ -51,7 +77,9 @@ it's short (<50 lines), summarize if long.
 
 **On failure:** Show:
 1. The number of failures
-2. Each failing test name and the assertion or panic that failed
+2. Each failing test name and the assertion, panic, or crash that failed
+   (for Swift: the failing `#expect`/`#require` or `XCTAssert*`, or the
+   crash, e.g. a force-unwrap of `nil`)
 3. Relevant context (file, line) — don't dump the full stack unless
    it's short
 
@@ -68,9 +96,10 @@ read the relevant source, reason about the mismatch.
 Close with one of:
 
 ```
-Tests: ✅ 42 passed, 0 failed   (cargo test, 1.3s)
+Tests: ✅ 42 passed, 0 failed   (<command or tool>, 1.3s)
 Tests: ⚠️  38 passed, 4 failed  — see above
 Tests: ❌ Build failed before tests ran — see above
+Tests: ⚠️  No test target — nothing to run (/add-tests can propose one)
 ```
 
 ---

@@ -20,7 +20,9 @@ disable-model-invocation: false
       new, added after a first /make-issues run showed real findings that didn't fit the
       original 11; the vocabulary is now explicitly extensible (favor reuse, allow a new
       category when genuinely justified) instead of an implicit closed set
-    - Stack-specific tooling: added Swift and C/C++ (upstream only covered TS/JS, Python, Rust, Go)
+    - Stack-specific tooling: added Swift and C/C++ (upstream only covered TS/JS, Python, Rust, Go),
+      then Xcode app projects (xcode-tools MCP build/issue tools, Swift concurrency and SwiftUI
+      idiom checks, hand-off to the xcode-integration specialist skills)
     - Model-invocation enabled with conversational trigger phrases (upstream was explicit-only)
   Everything else is unmodified from upstream. Re-diff against upstream periodically
   in case the base skill improves; these additions are designed to layer cleanly on top.
@@ -44,7 +46,7 @@ Cite `file:line` for every concrete finding. Vague claims like "the code general
 
 Do not skip this. Forming opinions before understanding the system produces bad audits.
 
-1. Read the README, package manifest (`package.json` / `pyproject.toml` / `Cargo.toml` / `go.mod` / `Package.swift` / `CMakeLists.txt`), and any architecture docs in `/docs` or `/adr`.
+1. Read the README, package manifest (`package.json` / `pyproject.toml` / `Cargo.toml` / `go.mod` / `Package.swift` / `CMakeLists.txt`), and any architecture docs in `/docs` or `/adr`. An Xcode project (`*.xcodeproj` / `*.xcworkspace`) has no readable manifest: list its targets and schemes with the xcode-tools MCP (`XcodeListTargets`, `XcodeListSchemes`) and read key settings with `GetTargetBuildSettings` (`SWIFT_VERSION`, `SWIFT_STRICT_CONCURRENCY`, deployment target). Without the MCP, use `xcodebuild -list` and `xcodebuild -showBuildSettings -target <name>`. Don't parse `project.pbxproj` by hand.
 2. Map the directory structure and identify the major modules / layers.
 3. Run `git log --oneline -200` and `git log --stat --since="6 months ago"` to see what's actually changing and where churn concentrates.
 4. Determine the starting finding ID for this run (see below). Do this even if `docs/reviews/PROJECT_REVIEW.md` doesn't currently exist.
@@ -89,7 +91,7 @@ Use `rg`, `ast-grep`, and language-native tooling to find concrete examples. Cit
 
 1. **Architectural decay** — circular deps, layering violations, god files (>500 LOC) and god functions, duplicated logic across 3+ sites where an abstraction should exist, abstractions that exist but nobody uses, dead code (unused exports, unreachable branches, stale commented-out blocks).
 2. **Consistency rot** — multiple ways of doing the same thing (HTTP clients, error handling, logging, config loading, validation, date handling). Naming drift. Folder structure that no longer reflects what the code actually does.
-3. **Type & contract debt** — `any` / `unknown` / `as any` / `# type: ignore` / loose dicts. Untyped API boundaries. Missing schema validation at trust boundaries.
+3. **Type & contract debt** — `any` / `unknown` / `as any` / `# type: ignore` / loose dicts (Swift: `Any` / `AnyObject` / `[String: Any]`, `as!` casts, implicitly unwrapped `!` properties outside `@IBOutlet`). Untyped API boundaries. Missing schema validation at trust boundaries.
 4. **Test debt** — run coverage if available; identify gaps on critical paths. Tests that assert implementation rather than behavior. Skipped or flaky tests. High-churn files with no tests.
 5. **Dependency & config debt** — `npm audit` / `pip-audit` / `cargo audit` for CVEs. Unused deps. Duplicate deps doing the same job. Env var sprawl (referenced but not documented; defaults inconsistent across envs).
 6. **Performance & resource hygiene** — N+1 queries, sync work in async paths, blocking I/O on hot paths, uncleaned listeners or handles, unnecessary serialization, algorithmically inefficient choices (e.g. O(n²) where O(n log n) is straightforward, repeated re-computation of invariant values, unnecessary allocations in hot loops).
@@ -152,6 +154,11 @@ Detect the stack from the manifest and run the relevant tools. Run them in paral
 * **Rust** — `cargo audit`, `cargo udeps`, `cargo machete`, `cargo clippy -- -W clippy::pedantic`.
 * **Go** — `govulncheck`, `go vet`, `staticcheck`, `golangci-lint run`.
 * **Swift** — `swiftlint` (style and idiom violations), `swift build` warnings (treat unaddressed warnings as findings), `periphery scan` (dead code/unused declarations), `swift package show-dependencies` for dependency graph review.
+* **Swift (Xcode app project)** — the SPM commands above don't apply. Build with the xcode-tools MCP `BuildProject`, then read every warning with `XcodeListNavigatorIssues` (`severity: "warning"`) — treat unaddressed warnings as findings, as for `swift build`. Without the MCP: `xcodebuild build -scheme <scheme> 2>&1 | grep -E 'warning:|error:'`. Package dependencies are in `*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. `periphery scan --project <name>.xcodeproj --schemes <scheme>` works on Xcode projects too. Swift-specific signals to grep for and judge:
+  * **Concurrency** — Swift language mode and `SWIFT_STRICT_CONCURRENCY` (from `GetTargetBuildSettings`); `@unchecked Sendable`, `nonisolated(unsafe)`, `DispatchQueue` / completion handlers where `async`/`await` fits; Combine (`import Combine`, `sink`, `@Published`) where async sequences or `@Observable` fit.
+  * **SwiftUI / app** — `ObservableObject` + `@Published` where `@Observable` fits the deployment target; `NavigationView` and other soft-deprecated APIs; work done in a `View` `body`; `ForEach` over `\.self` or indices on non-stable data. The `xcode-integration:swiftui-specialist` skill has Apple's current guidance — load it before judging SwiftUI findings rather than relying on memory.
+  * **Crash sites** — force-unwraps (`!`), `try!`, `fatalError` in reachable paths, `as!`. These are dimension 12 (crashes), not only `IDIOM`.
+  * **Build-setting hardening** — if the project has never been audited for it, note `xcode-integration:audit-xcode-security-settings` as a follow-up in Open questions; don't run it as part of this audit.
 * **C / C++** — `clang-tidy` (idiom, modernization, bug-prone patterns), `cppcheck`, `clang --analyze` (Clang Static Analyzer), `include-what-you-use` for header/include hygiene where practical.
 
 If a tool isn't installed, note it in the audit and move on rather than blocking. Do not install dev tools globally without permission.
@@ -270,7 +277,7 @@ For very large repos (>200k LOC), even subagent dispatch can produce shallow res
 
 ## License
 
-MIT, inherited from upstream (ksimback/tech-debt-skill). Local additions (dimensions 10–11, Swift/C/C++ tooling) are yours to modify freely.
+MIT, inherited from upstream (ksimback/tech-debt-skill). Local additions (dimensions 10–13, Swift/Xcode/C/C++ tooling) are yours to modify freely.
 
 ## Credits
 

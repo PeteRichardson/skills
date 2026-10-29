@@ -38,19 +38,19 @@ signals are present in the repo.
 
 | Feature | Auto? | Signals |
 |---------|-------|---------|
-| Project name | 🤖 | Repo name, `Cargo.toml`/`package.json` name |
+| Project name | 🤖 | Repo name, `Cargo.toml`/`package.json` name, Xcode target `PRODUCT_NAME` |
 | Tagline | 🔶 | `package.json`/`Cargo.toml` description — confirm with author |
 | Badges (CI, version, license) | 🤖 | `.github/workflows`, `LICENSE`, `Cargo.toml` registry name |
 | Project status | 🔶 | Last commit date, release count, open issues — author confirms |
 | Table of contents | 🤖 | Generated from H2 headings; skip if < 4 sections |
-| Prerequisites | 🤖 | `Cargo.toml` rust-version, `package.json` engines, CI matrix |
-| Installation | 🤖 | Package manager manifest, CI install steps, Makefile |
+| Prerequisites | 🤖 | `Cargo.toml` rust-version, `package.json` engines, `Package.swift` `swift-tools-version` and `platforms:`, Xcode deployment target and `SWIFT_VERSION`, CI matrix |
+| Installation | 🤖 | Package manager manifest, CI install steps, Makefile, Xcode schemes |
 | Quickstart / Hello World | 🔶 | Infer from `examples/`, tests, doctests — author captures screenshots/GIFs |
 | Feature list | 🔶 | Draft from `--help`, test names, README prose — author confirms differentiators |
-| CLI options reference | 🤖 | clap/argparse/cobra/click source definitions |
-| API docs link | 🤖 | `Cargo.toml` (docs.rs URL), `package.json` homepage, `mkdocs.yml` |
-| Configuration | 🔶 | dotenv loading, Config struct, `clap` `env()` attrs, config file paths |
-| Known limitations | 🔶 | `#[cfg(target_os)]`, TODO/FIXME comments, open issues — author reviews |
+| CLI options reference | 🤖 | clap/argparse/cobra/click/Swift ArgumentParser source definitions, or `CommandLine.arguments` parsing |
+| API docs link | 🤖 | `Cargo.toml` (docs.rs URL), `package.json` homepage, `mkdocs.yml`, Swift Package Index / DocC |
+| Configuration | 🔶 | dotenv loading, Config struct, `clap` `env()` attrs, config file paths, `UserDefaults` / `@AppStorage` keys, Settings scene |
+| Known limitations | 🔶 | `#[cfg(target_os)]`, `#if os(...)`, `@available`, TODO/FIXME comments, open issues — author reviews |
 | Architecture diagram | 🔶 | Claude can generate Mermaid from module/import structure |
 | Comparison table | 🖊 | Author must validate competitors |
 | Contributing | 🔶 | Link `CONTRIBUTING.md` if present; else scaffold from CI steps |
@@ -79,17 +79,29 @@ If a README already exists, preserve accurate sections; revise stale ones.
 find . -type f \( -name "*.rs" -o -name "*.py" -o -name "*.ts" \
   -o -name "*.go" -o -name "*.swift" -o -name "*.js" \) \
   | grep -v node_modules | grep -v .build | grep -v target | grep -v .git \
+  | grep -v DerivedData \
   | head -60
 
 find . -type d | grep -v node_modules | grep -v target \
-  | grep -v .git | grep -v __pycache__ | sort | head -40
+  | grep -v .git | grep -v __pycache__ | grep -v DerivedData \
+  | grep -v xcuserdata | grep -v '\.xcassets/' | sort | head -40
 ```
+
+For an Xcode project with the xcode-tools MCP available, also run
+`XcodeListTargets` and `XcodeListSchemes`. One repo often holds several
+products (e.g. an app plus a command-line tool) — each user-facing product
+gets its own section in the README.
 
 ### 1c. Entry points and CLI definition
 
 Read the main entry point and files that define user-facing behavior:
-- Entry point: `main.rs`, `main.py`, `index.ts`, `cmd/`, etc.
-- CLI definition: clap (`src/cli.rs`, `src/main.rs`), argparse, cobra, click
+- Entry point: `main.rs`, `main.py`, `index.ts`, `cmd/`, `main.swift`, the
+  `@main` type (a SwiftUI `App` struct for an app), etc.
+- CLI definition: clap (`src/cli.rs`, `src/main.rs`), argparse, cobra, click,
+  Swift ArgumentParser (`ParsableCommand`)
+- App UI: the root scene and view (`WindowGroup` content, `SKScene`
+  subclass) and any keyboard / mouse / touch handling — this is the app's
+  "usage"
 - Config loading: any file reading env vars or a config file
 
 Focus on what reveals *how a user interacts with this program*.
@@ -106,6 +118,16 @@ cat Package.swift 2>/dev/null
 Extract: package name (for badges/install commands), rust-version/engines
 (for prerequisites), registry presence (for install method), license.
 
+An Xcode project has no readable manifest. Use `GetTargetBuildSettings`
+(xcode-tools MCP) or `xcodebuild -showBuildSettings -target <name>` for
+`PRODUCT_NAME`, `SWIFT_VERSION`, and the deployment target
+(`MACOSX_DEPLOYMENT_TARGET` / `IPHONEOS_DEPLOYMENT_TARGET`) — these give
+the prerequisites. The required Xcode version follows from the Swift
+version and SDK; mark it 🖊 if it can't be pinned down. Package
+dependencies are in
+`*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
+Don't parse `project.pbxproj` by hand.
+
 ### 1e. CI, tests, and examples
 ```bash
 ls .github/workflows/ 2>/dev/null   # CI provider → badge URLs
@@ -117,8 +139,10 @@ cat Makefile 2>/dev/null            # build/test/install targets
 ```bash
 # Platform conditionals
 grep -r "cfg(target_os" src/ 2>/dev/null | head -20
-# Known issues
+grep -rn "#if os(\|#if targetEnvironment\|@available(" --include='*.swift' . 2>/dev/null | head -20
+# Known issues (Swift projects often have no src/ — search from the root)
 grep -rn "TODO\|FIXME\|HACK\|KNOWN" src/ 2>/dev/null | head -20
+grep -rn "TODO\|FIXME\|HACK\|KNOWN" --include='*.swift' . 2>/dev/null | head -20
 ```
 
 ---
@@ -132,7 +156,7 @@ Before writing, answer:
 3. **What makes it different?** What would you do without it?
 4. **Key limitation or trade-off?** Platform support, performance ceiling, scope boundary?
 5. **What are the most common workflows?** (the 80% cases)
-6. **Project type?** CLI tool → CLI options reference; library → API docs link (mutually exclusive)
+6. **Project type?** CLI tool → CLI options reference; library → API docs link; GUI app (macOS/iOS) → controls reference (mutually exclusive per product — a repo with an app and a CLI tool gets one of each)
 
 ---
 
@@ -140,7 +164,8 @@ Before writing, answer:
 
 Use the CLI tool template below as the primary structure. For libraries,
 replace the CLI options reference with an API docs link and quick-start
-import snippet.
+import snippet. For a GUI app (Xcode app target), make the replacements
+in "App variant" after the template.
 
 ````markdown
 <!-- Logo if author provides one — omit entirely if not yet available -->
@@ -371,6 +396,45 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 Licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
 ````
 
+### App variant (Xcode app target)
+
+Replace these sections of the template; keep the rest.
+
+- **Prerequisites** — macOS version to build on, Xcode version, and the
+  app's deployment target and platforms, from Step 1d. Example:
+  `- **Xcode** 26 or later` / `- Runs on **macOS 15** or later`.
+- **Installation** — "From source" only, unless the repo shows a release
+  or App Store / TestFlight link:
+  ````markdown
+  ```sh
+  git clone https://github.com/OWNER/REPO.git
+  open REPO/PROJECT.xcodeproj
+  ```
+  Select the `SCHEME` scheme and **My Mac** (or a simulator), then press ⌘R.
+
+  Command line:
+  ```sh
+  xcodebuild -project PROJECT.xcodeproj -scheme SCHEME -configuration Release build
+  ```
+  ````
+  If the app needs a signing team to run (entitlements, capabilities),
+  say so with a 🖊 TODO — signing setup is author-only knowledge.
+- **Verify** — delete it; an app has no `--version`.
+- **Quick Start** — what the user sees on launch and the first thing to
+  do. The screenshot TODO moves to the top of this section, and is
+  required, not optional.
+- **Usage** → **Controls** — a table of the real keyboard, mouse, and
+  touch inputs, read from the event-handling code (`keyDown`,
+  `mouseDown`, `onKeyPress`, gestures, menu commands). Don't invent any.
+- **Configuration** — Settings-scene options and `UserDefaults` /
+  `@AppStorage` keys, if any; otherwise delete it.
+- **Contributing** — build and test with ⌘B / ⌘U, or
+  `xcodebuild test -scheme SCHEME`, in place of `cargo test`.
+
+A command-line tool target in the same repo (e.g. a `tools/` target)
+gets its own short section with the CLI template's Usage block, built
+with `xcodebuild -scheme <tool> build` or run from Xcode.
+
 ---
 
 ## Writing guidelines
@@ -386,11 +450,13 @@ Pull actual output from `examples/` or tests. Never invent examples.
 cannot generate them — leave `<!-- 🖊 TODO -->` comments where they belong
 so the author knows exactly where to drop them.
 
-**CLI tools get a Usage section; libraries get an API docs link.** These are
-mutually exclusive. Don't include both.
+**CLI tools get a Usage section; libraries get an API docs link; apps get
+a Controls section.** These are mutually exclusive per product. Don't
+include two for the same product.
 
 **Known Limitations builds trust.** A README with no caveats reads as
-incomplete or dishonest. Scan `#[cfg(target_os)]`, TODO/FIXME comments,
+incomplete or dishonest. Scan `#[cfg(target_os)]`, `#if os(...)`,
+`@available`, TODO/FIXME comments,
 and open issues tagged "known issue" or "wontfix" to populate this section.
 Mark it for author review.
 
@@ -436,6 +502,9 @@ After confirmation:
 - If no `CLAUDE.md`: "Want a `CLAUDE.md` too for future Claude Code sessions?"
 - If the quickstart has no screenshot: "A demo GIF here would be the
   highest-ROI improvement — record one with `vhs` or QuickTime and I can embed it."
+  For an app, with the xcode-tools MCP available, offer to take the
+  screenshot: run the app (`RunProject`) and capture it with the
+  `xcode-integration:device-interaction` skill.
 
 ---
 
@@ -444,7 +513,8 @@ After confirmation:
 - Don't use placeholder text (`<your-repo>`, `YOUR_VALUE`) in the output —
   leave `<!-- 🖊 TODO -->` comments for things that need author input
 - Don't describe features that don't exist yet as if they do
-- Don't include both a CLI options reference AND an API docs link — pick one
+- Don't include more than one of CLI options reference, API docs link, and
+  Controls for the same product — pick one
 - Don't invent flag names — read the CLI source definition
 - Don't skip Known Limitations — it's what separates trustworthy docs from polished fiction
 - Don't pad with generic boilerplate unrelated to this specific project

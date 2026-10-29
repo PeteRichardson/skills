@@ -34,22 +34,33 @@ accurate; revise or replace sections that are stale.
 
 ### 1b. Project structure
 ```bash
-find . -type f -name "*.swift" -o -name "*.py" -o -name "*.ts" \
-  -o -name "*.rs" -o -name "*.go" -o -name "*.js" \
+find . -type f \( -name "*.swift" -o -name "*.py" -o -name "*.ts" \
+  -o -name "*.rs" -o -name "*.go" -o -name "*.js" \) \
   | grep -v node_modules | grep -v .build | grep -v .git \
+  | grep -v DerivedData \
   | head -80
 ```
 
 Also get the directory tree:
 ```bash
 find . -type d | grep -v node_modules | grep -v .build \
-  | grep -v .git | grep -v __pycache__ | sort | head -60
+  | grep -v .git | grep -v __pycache__ | grep -v DerivedData \
+  | grep -v xcuserdata | grep -v '\.xcassets/' | sort | head -60
 ```
+
+**Xcode projects:** the directory tree doesn't show how files map to
+products. With the xcode-tools MCP available, run `XcodeListTargets` and
+`XcodeListSchemes`; without it, `xcodebuild -list`. Each target (app,
+command-line tool, framework, test bundle, extension) is a candidate
+component, and the files each one compiles are its boundary. Note
+non-code resources that shape behavior — asset catalogs, sounds,
+`.sks` / `.scn` scene files, entitlements, `Info.plist` keys.
 
 ### 1c. Key source files
 Read the most important files — entry points, core modules, main data
 types/models, configuration. Prioritize:
-- Entry point (main.swift, main.py, index.ts, main.rs, etc.)
+- Entry point (main.swift, main.py, index.ts, main.rs, the `@main` type —
+  for a SwiftUI app, the `App` struct and its scenes, etc.)
 - Core data model files
 - Primary business logic files
 - Configuration / dependency injection setup
@@ -66,7 +77,19 @@ cat Cargo.toml 2>/dev/null       # Rust
 cat requirements.txt 2>/dev/null # Python
 cat go.mod 2>/dev/null           # Go
 cat *.podspec 2>/dev/null        # CocoaPods
+cat *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved \
+  2>/dev/null                    # Xcode project's Swift packages
 ```
+
+For an Xcode project, Apple frameworks are dependencies too — they rarely
+appear in a manifest. List them from the `import` lines
+(`grep -rhE '^import ' --include='*.swift' . | sort | uniq -c`) and
+include the ones that shape the design (SwiftUI, SpriteKit, SwiftData,
+AVFoundation, …) in External Dependencies. Read the platform, deployment
+target, Swift language version, and strict-concurrency setting with
+`GetTargetBuildSettings` (or `xcodebuild -showBuildSettings`) for the
+Configuration and Environment section. Don't parse `project.pbxproj` by
+hand.
 
 ---
 
@@ -83,7 +106,13 @@ Before writing, form a clear mental model:
 5. **What external systems does it depend on?** Files, databases,
    APIs, hardware, OS services?
 6. **What design patterns are in use?** (e.g., pipeline, actor model,
-   event-driven, MVVM, service layer)
+   event-driven, MVVM, service layer; in Swift apps also: where state
+   lives — `@Observable` / `ObservableObject` / `@State` — how SwiftUI and
+   SpriteKit or UIKit/AppKit are bridged, and which actor owns which work)
+7. **What drives time?** For games and simulations: the update loop
+   (`SKScene.update(_:)`, a `Timer`, `TimelineView`, `CADisplayLink`), how
+   often it runs, and what it does each tick. Data Flow should trace one
+   tick, not only one user action.
 
 If any of these are unclear from the code, note them as open questions
 in the document rather than guessing.
