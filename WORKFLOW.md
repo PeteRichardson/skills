@@ -42,7 +42,7 @@ through one gate, `/issue-triage`, before anything ranks it:
 |---|-------|---------|----------|-------------------------|
 | 1 | Find the work | `/project-review` and/or `/code-review <scope>` — or, from an idea, `/grill-with-docs` → `/to-spec` | Findings with `file:line`, severity, effort — or a spec | `docs/reviews/PROJECT_REVIEW.md`, `docs/reviews/code-review_*.md` |
 | 2 | File and complete the work | `/make-issues [--all]`, `/to-tickets`, or by hand — then `/issue-triage` | Complete GitHub issues: summary, labels, fingerprint | Issues carrying `<!-- project-review-finding -->` and `severity:`/`category:`/`effort:` labels (`source:` when a review filed them) |
-| 3 | Decide what to work | `/fix-order` | Disposition per issue + ordered work units | `.claude/tmp/fix-order/FIX_ORDER.md` |
+| 3 | Decide what to work | `/fix-order` | Goals (with fix order and next step) + disposition per issue + ordered work units | `.claude/tmp/fix-order/FIX_ORDER.md` |
 | 4 | Do the work | `/work-issue all` (or `/work-issue <n>`); `/implement-spec` for one big spec | One PR per work unit, stacked when units overlap | Branches `Fix-I<n>-…` (one name, local and remote), open PRs, a resolution comment per issue |
 | 5 | Decide merge order | `/merge-order` | `/fix-order`'s PR order, with ready / stack / rebase / next action per PR | `.claude/tmp/merge-order/MERGE_ORDER.md` |
 | 6 | Merge | `/code-review <pr>`, then **manual** merge in the stage-5 order | Merged PRs, auto-closed issues | `docs/reviews/code-review_PR*.md`, git history |
@@ -151,7 +151,8 @@ calls `/issue-triage` on the new issues, which adds the summary and any missing 
 `/issue-triage` is the gate for **every** issue: from `/make-issues`, from `/to-spec` or
 `/to-tickets`, or filed by hand. Run it after you file an issue by hand, and after
 `/to-tickets`. It leaves Matt's `ready-for-agent` label alone and adds only what is missing.
-The summary marker it writes — `> **SUMMARY:**` at the very top of the body — is one shape,
+The summary marker it writes — `> **SUMMARY:**` at the very top of the body, with an
+`> **IMPACT:**` line under it that gives the user-impact tier `/fix-order` ranks goals by — is one shape,
 owned by `/issue-triage` and restated in each repo's `docs/agents/issue-tracker.md` so an
 issue is filed that way whatever files it; a body that instead opens with a `## Summary`
 section gets the heading converted, not a second summary stacked above it.
@@ -172,8 +173,16 @@ first".
 ```
 /fix-order                      # full open queue
 /fix-order #11 #15 #18          # scoped
-/fix-order list                 # past snapshots, live open/closed status
+/fix-order list                 # past snapshots: goal index with live state
+/fix-order goal "Docs fixes" 331 358 485   # make a parent issue that groups issues into one goal
 ```
+
+The report starts with **goals**: a feature (a parent issue and its GitHub sub-issues), a
+proposed cluster of related bugs, or one user-visible issue. Each goal card shows its issues
+in fix order (closed ones `✓`, backlog ones `skip`) and the next command. Goals rank by the
+`**IMPACT:**` tier, then a started goal before a new one, then effort. A feature whose only
+open work is in the backlog goes to **Ready to close**. Issues with no user-visible effect,
+in no goal, go to **Code health**. Everything below is the per-issue plan under the goals.
 
 `/fix-order` needs only the open issues and the open PRs — no review report. It puts open
 PRs in the same graph as the issues: a PR is an issue with a known fix. An issue that shares

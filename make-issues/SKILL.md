@@ -91,6 +91,12 @@ After the last create, call `/issue-triage` with the numbers of the issues this 
 
 Skip this phase when the run created nothing.
 
+## Phase 5: Group a feature into a goal
+
+When two or more issues that this run created are parts of **one feature** (the report or the user names them as one piece of work, for example the sub-tasks of one recommendation), ask once: "Group #n #m … into a goal named "<name>"?" A review's findings are usually independent: do not ask when nothing joins them except the report.
+
+On yes, run the steps of "The `goal` subcommand" in `~/.claude/skills/fix-order/SKILL.md`, with the confirmed name and these issue numbers. That section owns the parent issue's format and its confirmation; do not keep a copy here.
+
 ## Next in the pipeline
 
 This skill is stage 2 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line:
@@ -105,6 +111,7 @@ Vary it only for these cases:
 ## Rules
 
 - Never edit an issue's original body unless this skill created that issue in this same run.
+- Never make a parent issue without the user's yes in Phase 5.
 - Never skip the Phase 3 dedup search, even for a single `-f`-scoped finding.
 - Always run `/issue-triage`'s category resolution steps in order (existing repo labels, then baseline, then mint new) — never skip straight to minting a new category, and never force a bad fit against an existing one just to avoid creating a label.
 - Stop and report rather than guess when: the source path is missing, matches neither known format, or `gh` reports an authentication/API error. No silent retries.

@@ -1,17 +1,17 @@
 ---
 name: fix-order
 description: >-
-  Assess a set of open GitHub issues, together with the open PRs, and recommend what to work, in
-  what order, what to combine into a single PR, what to close as moot, and what needs a human
-  decision first. Needs only the issues and PRs — no review report. Produces a relationship graph
-  (file/symbol overlap, declared dependencies, supersession), a disposition per issue, an ordered
-  work plan ranked by dependency, severity, blast radius, then effort, and a merge order for the
-  open PRs. It is the one source of order: /merge-order reads its PR order, and /work-issue batch
-  mode runs this protocol to order its queue. Subcommands: `list`, `open`, `clean` [--all], and
-  `label`, which puts a `status: needs-decision` label on GitHub for UI visibility. Use when the
-  user has several open issues and asks which to fix first, how to order the backlog, or to
-  prioritize the issue queue. Advisory only — creates, closes and modifies nothing; `label` is the
-  sole mutation, and it asks first.
+  Assess a set of open GitHub issues, together with the open PRs, and recommend which goals to
+  work. A goal is a feature (a parent issue and its sub-issues), a proposed cluster of related
+  bugs, or one user-visible issue; each goal card shows its issues in fix order and the next
+  command. Goals rank by user impact, then started before not started, then effort. Underneath,
+  it still produces a relationship graph, a disposition per issue, a per-issue work plan and a
+  merge order for the open PRs: /merge-order reads its PR order, and /work-issue batch mode runs
+  this protocol to order its queue. Subcommands: `list`, `open`, `clean` [--all], `label` (syncs
+  `status: needs-decision` onto GitHub), and `goal "<name>" <n>...` (makes a parent issue that
+  groups existing issues into a goal). Use when the user has several open issues and asks which to
+  fix first, what to work next, how to order the backlog, or to prioritize the issue queue.
+  Advisory only — `label` and `goal` are the only mutations, and both ask first.
 disable-model-invocation: true
 ---
 
@@ -25,7 +25,9 @@ When invoked via `/fix-order`, follow the protocol below. Everything from here t
 
 ## Operating principles
 
-**The output is a disposition per issue, not a ranking.** A linear order cannot express "don't work this one at all" or "work these two as one change," which are the two highest-value things this skill produces. Ranking is the last step, applied only to what survives.
+**The user picks a goal, not an issue.** A list of 70 issues is too long to choose from, and the remainders of old features hide in it. So the deliverable starts with **goals** (Phase 4.7): each goal is a set of issues that the user takes on as one item of work, with its issues in fix order and the next command. The per-issue plan stays, as an appendix, because `/work-issue` batch mode and `/merge-order` use it.
+
+**The output under the goals is a disposition per issue, not a ranking.** A linear order cannot express "don't work this one at all" or "work these two as one change," which are the two highest-value things this skill produces. Ranking is the last step, applied only to what survives.
 
 **A PR is an issue with a known fix.** Open PRs and open issues are one stream of changes. An order that ignores a PR can make its fix wrong: another change lands first and moves the code under it. So open PRs go into the same graph as the issues (Phase 1.5, Phase 2), and an issue that touches a PR's files never gets a position that ignores the PR.
 
@@ -37,39 +39,41 @@ The single exception is the **`label` subcommand**, which the user invokes separ
 
 **Deferral is the maintainer's call, not this skill's.** Proposing that an issue be deferred is useful; applying a `backlog` label is a priority decision belonging to the user. This skill proposes; it never applies a deferral label, and `label` won't either — see "Why `status: needs-decision` is labelled but `backlog` isn't" below for why those two aren't the same act.
 
-**Axes stay separate.** Dependency order, severity, blast radius, and effort are four different things. Never blend them into a score — tier them, and state the tradeoff in prose when they conflict. (Same reasoning as Phase 4.6's critical tier for PRs.)
+**Axes stay separate.** Dependency order, impact tier, severity, blast radius, and effort are different things. Never blend them into a score — tier them, and state the tradeoff in prose when they conflict. (Same reasoning as Phase 4.6's critical tier for PRs.)
 
 ## Phase 0: Subcommands
 
 Check the invocation before doing anything else:
 
-* **`/fix-order list`** — for every file in `.claude/tmp/fix-order/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`units`, `generated`) rather than the full report. Then make **one** `gh issue list --state all --json number,state,title,url,closedAt` call covering the union of every issue number across all files, and classify each file's issues against that single result — don't make a separate API call per file.
+* **`/fix-order list`** — for every file in `.claude/tmp/fix-order/` (create the directory first if absent — an empty listing isn't an error), read its frontmatter (`goals`, `units`, `generated`) rather than the full report. Then make **one** `gh issue list --state all --json number,state,title,url,closedAt` call covering the union of every issue number across all files, and classify each file's issues against that single result — don't make a separate API call per file.
 
-  For each file, print the filename, its `generated` timestamp, and its resolved absolute path on one line, then two groups below it:
+  For each file, print the filename, its `generated` timestamp, and its resolved absolute path on one line, then the goal index with live state below it:
 
   ```
-  FIX_ORDER.md  (generated 2026-07-26 15:04)  /Users/pete/project/.claude/tmp/fix-order/FIX_ORDER.md
-      1  #18, #19  ‼ set_field: precedence + agreement      https://github.com/org/repo/issues/18
-      2  #11, #15    SPARQL retry set + Retry-After         https://github.com/org/repo/issues/11
-      ?  #12         Rating priority (NEEDS-DECISION)       https://github.com/org/repo/issues/12
+  FIX_ORDER.md  (generated 2026-11-04 15:04)  /Users/pete/project/.claude/tmp/fix-order/FIX_ORDER.md
+      G1  Large file handling (#571)       Headline     1 open   Next: /work-issue 573, then close #571
+      G2  Key ranges (proposed)            Improvement  7 open   Next: /fix-order goal "Key ranges" 251 255 256 257 258 260 262
+      G3  ANSI colours in command views    Improvement  1 open   Next: /work-issue 601
       ---
-      #20    Sloop-of-war era filter    closed 2026-07-26   https://github.com/org/repo/issues/20
+      Ready to close:  #588 Neighbor lines  — all work done; #590 stays in the backlog
   ```
 
-  - **Outstanding** (issues the live result doesn't report as `CLOSED`): one line per work unit, in `units` array order, prefixed with its order number — or `?` for a unit whose disposition is `HOLD`, `NEEDS-DECISION` or `DEFER`, which have no position in the sequence. Prefix with `‼` when the unit's frontmatter `critical` is `true`. No color — plain text only.
-  - A `---` separator line, only if both groups are non-empty.
-  - **Closed**: one line per issue, newest `closedAt` first, ending with `closed <date>`.
-  - Each line ends with the issue's plain `url` from the live result — plain text, not a rendered hyperlink.
+  - **Goals**: one line per goal in `goals` array order — id, name, tier, the count of members that the live result does not report as `CLOSED`, and the recorded `next`. When a member closed since `generated`, recompute only the count and step past the closed member in `next`; do not re-rank.
+  - A `---` separator line, then **Ready to close**: each goal from the file's `ready_to_close`, plus each goal whose open members are now all `skip` (backlog). Omit when empty.
+  - No color — plain text only. Prefix a goal with `‼` when any of its units is `critical: true`.
+
+  A file written before goals existed has no `goals` key. For it, print `units` as before: one line per unit, prefixed with its order or `?`, then closed issues newest first.
 
   Sort files newest-generated first (from frontmatter `generated`, not file mtime). Stop here; don't run the ranking.
 * **`/fix-order open`** — run `open .claude/tmp/fix-order/` (macOS). If `open` isn't available, print the absolute path. Stop here.
 * **`/fix-order clean`** — read every file's frontmatter issue numbers, make one `gh issue list --state all --json number,state` call covering the union. Any file whose entire issue set is now closed is a removal candidate. Show candidates plus what's being kept and why, and ask for confirmation before deleting. Stop here.
 * **`/fix-order clean --all`** — unconditional wipe of `.claude/tmp/fix-order/`. Show what will be deleted, ask for confirmation. Stop here.
+* **`/fix-order goal "<name>" <n> <n>...`** — make a parent issue that groups existing issues into one goal. **This writes to GitHub.** See "The `goal` subcommand" below. Stop here; don't run the ranking.
 * **`/fix-order label`**, or **`/fix-order label #11 #15`** — sync the `status: needs-decision` label against an existing snapshot so the queue's blocked issues are visible in the GitHub UI. **This is the only subcommand that mutates GitHub.** See "The `label` subcommand" below. Stop here; don't run the ranking.
 * **Executed as a PR-only sub-protocol by `/merge-order`** — `/merge-order` reads this file and runs only what the PR order needs: Phase 1.5 step 5 (the open PRs), the linked issues' `severity:` labels, the PR–PR `OVERLAPS` edges of Phase 2, and Phase 4.6. No issue is ranked, and no snapshot is written here — `/merge-order` writes its own. This keeps one source of order without paying for the issue analysis on every merge.
 * **`/fix-order`** (no args) — full-queue run, proceed to Phase 1.
 * **`/fix-order #11 #15 #18`** (issue numbers) — scoped run limited to those issues, proceed to Phase 1 with the scope noted.
-* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 1.5–5, including Phase 4.5, directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 1.5, and still write the snapshot. Phase 1.5 is not skipped — the open PRs and the verification results are inputs to the graph, not filters.
+* **Executed as a sub-protocol by `/work-issue` batch mode** — not via the Skill tool (`disable-model-invocation: true` puts this skill out of reach of it), but by `/work-issue` reading this file and running Phases 1.5–5, including Phase 4.5, directly. The caller supplies an already-filtered candidate set: skip Phase 1, use the supplied set verbatim, proceed to Phase 1.5, and still write the snapshot. Skip Phase 4.7: batch mode works issues, not goals. Still drop a **parent** (Phase 1 step 5) from the set: a parent is closed when its goal is done, never worked. Phase 1.5 is not skipped — the open PRs and the verification results are inputs to the graph, not filters.
 
 ## Phase 1: Enumerate the eligible set
 
@@ -77,13 +81,28 @@ Check the invocation before doing anything else:
 2. `gh issue list --state open --limit 200 --json number,title,body,comments,labels,createdAt,updatedAt,url`
 3. **Exclude already-deferred issues.** Any issue carrying `backlog`, `icebox`, `someday`, `someday-maybe`, `future`, `deferred`, `on hold`, `wontfix`, or a `priority/backlog`-style namespaced equivalent is out of scope — that decision is already made. List them once as excluded, with the label that fired, so a mislabelled issue stays visible. This vocabulary is shared with `/work-issue`'s Phase 1 deferral check; keep the two lists in sync.
 4. **Exclude already-addressed issues** using `/work-issue`'s Phase 2 checks: an open PR whose `closingIssuesReferences` names it, a PR `headRefName` matching `(^|-)I?<n>(-|$)`, or a local/remote branch matching the same pattern. Report each with which check fired.
+5. **Read the parent links.** One paginated GraphQL call gives each open issue's parent and sub-issues, with the state and labels of each sub-issue (closed ones too):
+
+   ```bash
+   gh api graphql --paginate -F owner=<owner> -F name=<repo> -f query='
+     query($owner:String!,$name:String!,$endCursor:String){
+       repository(owner:$owner,name:$name){
+         issues(states:OPEN,first:100,after:$endCursor){
+           pageInfo{hasNextPage endCursor}
+           nodes{number parent{number state}
+             subIssues(first:100){nodes{number title state closedAt labels(first:30){nodes{name}}}}}}}}'
+   ```
+
+   An open issue with one or more sub-issues is a **parent**. A parent is not a work unit: it is closed when its goal is done, so it gets no disposition and no position in Phase 4. Keep the result for Phase 4.7. A parent with a deferral label (step 3) takes its full goal out of the run: list its open sub-issues under the step 3 exclusions as "parent #<n> is in the backlog".
+
+Steps 3 and 4 take issues out of the **ranking**, not out of the goals. Phase 4.7 shows a backlog sub-issue as `skip`, and an issue with an open PR as `PR #<n>`, in its goal's chain.
 
 ## Phase 1.5: Gather the evidence
 
 `/work-issue` batch mode runs this phase too. It reads; it filters nothing.
 
 1. **Fingerprint.** For each issue, scan the body and every comment for `<!-- project-review-finding ... -->` (written by `/make-issues` or `/issue-triage`) and extract `file:`, `category:`, `keywords:`, and `finding_id:` if present. `finding_id` is absent on every fingerprint `/issue-triage` wrote — that is normal. Never infer a `finding_id` that isn't recorded.
-2. **Labels.** Read the `severity:`, `effort:`, and `category:` labels.
+2. **Labels and impact.** Read the `severity:`, `effort:`, and `category:` labels. Read the impact tier from the `**IMPACT:**` line in the body (the tiers are in `~/.claude/skills/issue-triage/SKILL.md`, "Impact tiers"). No line means the tier is unknown: do not guess it. A missing tier does **not** make the issue incomplete for Phase 4 — only Phase 4.7 uses the tier.
 3. **Completeness.** An issue is **incomplete** when it has no fingerprint, or no `severity:` label, or no `effort:` label — the three things Phases 2 and 4 rank on. Mark it `incomplete` and do not fill the gap: no file guessed from the prose, no severity guessed from the title. `/issue-triage` owns those values. An incomplete issue still goes through Phase 3 (its own text can make it `NEEDS-DECISION` or `DEFER`), but Phase 2 gives it only the edges its fingerprint supports, and Phase 4 ranks it after every complete unit.
 4. **Verification result.** Scan the comments for `<!-- issue-verification ... -->` (written by `/issue-triage --verify`). When there is more than one, use the newest comment's. Record `result:` and `sha:`. No marker is normal — verification is opt-in — and an unverified issue is **not** ranked lower for it.
 5. **Open PRs.** One call:
@@ -245,6 +264,51 @@ Phase 2 does for issues: **incidental adjacency** (near each other, no interacti
 collision is a judgment call — label it so. It is what a careless rebase resolves into
 something that merges cleanly and is wrong, so the deliverable names it.
 
+## Phase 4.7: Form the goals
+
+A **goal** is a set of issues that the user takes on as one item of work. This phase puts every issue of the run into a goal or into **Code health**, then orders the goals. It changes no disposition and no unit order: it reads them.
+
+1. **Feature goals.** Each open parent (Phase 1 step 5) that is not in the backlog is one feature goal. Its members are its sub-issues, closed ones included. A sub-issue that is itself a parent adds its own sub-issues to the same goal: the top-most open parent owns the goal. An issue whose parent is closed is not in that goal; treat it as if it had no parent.
+2. **Proposed bug-cluster goals.** From the open issues in no feature goal, propose a group when two or more issues share one theme that the user would name as one piece of work: a `GROUP` unit, a `COLLIDES` edge, or the same feature area and the same kind of fault in the issue text (for example, six issues about key ranges). This is a judgment call — write the shared theme in the card. Never put an issue in two goals. A proposed goal has no parent issue yet; its card says how to make one.
+3. **Single-issue goals.** Each other open issue whose tier is not `Maintainer-only` is a goal of one issue. An issue with an unknown tier is a goal of one issue too, so it stays visible.
+4. **Code health.** Each other open issue whose tier is `Maintainer-only` goes to Code health, not to a goal. A `Maintainer-only` issue inside a feature goal or a bug cluster stays in that goal.
+5. **The chain.** In each goal, list the members in this sequence: the parent (`umbrella`), the closed members (`✓`, by `closedAt`), the open members in fix order (their Phase 4 order; members with no position after them, by issue number), then the backlog members (`skip (backlog)`). Mark an open member by its state:
+
+   | Member state | Marker |
+   |---|---|
+   | `WORK`, `STACK` | `open` |
+   | `GROUP` | `#552+#553 one PR` (one entry for the unit) |
+   | open PR addresses it (Phase 1 step 4) | `PR #<n>` |
+   | `HOLD` | `hold: <held_for>` |
+   | `NEEDS-DECISION` | `? decide` |
+   | `CLOSE-MOOT` | `⨯ moot by #<n>` (or `⨯ fixed`, for a verification `already-fixed`) |
+   | `DEFER` | `defer?` |
+   | incomplete | `open (run /issue-triage)` |
+
+6. **Tier, started and effort of a goal.**
+   - **Tier**: the highest impact tier of its open, non-backlog members, not counting the parent. Closed members and backlog members do not count. If no member has a known tier, the goal's tier is `unknown`.
+   - **Started**: one or more members are closed.
+   - **Effort**: the largest `effort:` label among its open, non-backlog members.
+7. **Next up.** Walk the open members in chain order and write the first step that applies:
+   - a proposed goal with no parent → `/fix-order goal "<name>" <n> <n>...` first, then the rest of this list,
+   - `PR #<n>` → `review and merge PR #<n>`,
+   - `? decide` → `decide #<n>: <the question>`. Never point "Next up" past an open decision to work that depends on it,
+   - `⨯ moot` → `close #<n> (moot by #<m>)`,
+   - `hold` → `merge PR #<n> first`,
+   - otherwise → `/work-issue <n>` (all numbers of a `GROUP` unit).
+
+   After the last open member, add `then close #<parent>` for a feature goal. Give the first step, and the step after it when that one is already clear.
+8. **Ready to close.** A feature goal whose members are all closed, backlog, or `CLOSE-MOOT` is not ranked. It goes to Ready to close: "close #<parent>; keep #<n> in the backlog". This is a proposal; nothing is closed.
+9. **Order the goals.** In this order of precedence:
+   1. **Dependency (hard).** A goal with an open member that `DEPENDS-ON` an open member of another goal goes after that goal. State the edge in the card.
+   2. **Impact tier**, highest first. `unknown` goes last, with "run `/issue-triage` first".
+   3. **Started** before not started, so old remainders get done and leave the list.
+   4. **Effort**, `S` before `M` before `L`.
+   5. Then the lowest Phase 4 order among the goal's members.
+
+   Number the goals `G1`, `G2`, … in this order. The number is only for this snapshot.
+10. **Name.** A parent made by the `goal` subcommand carries `<!-- fix-order-goal` with a `name:` field in its body: use that name as it is. Another feature goal gets a short form of its parent's title (for example "Show huge files and huge command-view output with no cap" → "Large file handling"). A proposed goal gets a short name for its theme. A single-issue goal uses a short form of the issue title. Always show the numbers next to the name.
+
 ## Phase 5: Deliverable
 
 This project uses `.claude/tmp/` as the shared convention for ephemeral skill output, namespaced per-skill. Before writing anything:
@@ -277,6 +341,34 @@ Write `.claude/tmp/fix-order/<filename>` with YAML frontmatter so `list` can rep
 ```yaml
 ---
 generated: <ISO 8601 timestamp>
+goals:
+  - id: G1
+    name: Large file handling
+    kind: feature          # feature | proposed | single
+    parent: 571            # ~ for proposed and single
+    tier: Headline
+    started: true
+    effort: L
+    members: [571, 51, 572, 597, 573, 574]
+    open: [573]
+    skip: [574]
+    next: "/work-issue 573, then close #571"
+  - id: G2
+    name: Key ranges
+    kind: proposed
+    parent: ~
+    tier: Improvement
+    started: false
+    effort: S
+    members: [251, 255, 256, 257, 258, 260, 262]
+    open: [251, 255, 256, 257, 258, 260, 262]
+    skip: []
+    next: '/fix-order goal "Key ranges" 251 255 256 257 258 260 262, then /work-issue 251'
+ready_to_close:
+  - parent: 588
+    name: Neighbor lines
+    skip: [590]
+code_health: [342, 343, 344]
 prs:
   - number: 31
     order: 1
@@ -363,9 +455,38 @@ units:
 ---
 ```
 
-`prs` is the Phase 4.6 merge order, one entry per open PR. `stack` is present only on a PR with an unresolved `work-issue-stack` marker; `blocked` is `true` while its parent is open. `units` is ordered by `order`, with unordered dispositions (`HOLD`, `NEEDS-DECISION`, `DEFER`, `CLOSE-MOOT`) last, carrying `order: ~`. `finding: ~` means no recorded finding ID — never guess one. A `STACK` on a unit carries `parent_order` and `parent_issue`; a `STACK` on an open PR carries `parent_pr` only. `incomplete: true` is written only on an incomplete unit, and omitted otherwise. Entries are never removed after an issue closes; see Repeat-run mode.
+`goals` is the Phase 4.7 goal order. `open` and `skip` are the members that were open and in the backlog at `generated`; `list` checks them against the live state. `ready_to_close` and `code_health` are omitted when empty. `prs` is the Phase 4.6 merge order, one entry per open PR. `stack` is present only on a PR with an unresolved `work-issue-stack` marker; `blocked` is `true` while its parent is open. `units` is ordered by `order`, with unordered dispositions (`HOLD`, `NEEDS-DECISION`, `DEFER`, `CLOSE-MOOT`) last, carrying `order: ~`. `finding: ~` means no recorded finding ID — never guess one. A `STACK` on a unit carries `parent_order` and `parent_issue`; a `STACK` on an open PR carries `parent_pr` only. `incomplete: true` is written only on an incomplete unit, and omitted otherwise. Entries are never removed after an issue closes; see Repeat-run mode.
 
-Then the body:
+Then the body. The goal sections come first; they are what the user reads. Everything after them is the **Appendix: per-issue plan**, under one heading of that name.
+
+* **Goals** — the index, one row per goal in Phase 4.7 order:
+
+  ```markdown
+  | Goal | Name | Tier | Started | Open | Next up |
+  |------|------|------|---------|------|---------|
+  | G1 | Large file handling (#571) | Headline | yes | 1 | /work-issue 573, then close #571 |
+  | G2 | Key ranges (proposed) | Improvement | no | 7 | /fix-order goal "Key ranges" 251 255 256 257 258 260 262 |
+  | G3 | ANSI colours in command views (#601) | Improvement | no | 1 | /work-issue 601 |
+  ```
+
+* **Goal cards** — one per goal, in the same order:
+
+  ```
+  G1  Large file handling (#571)            Headline · started · effort L
+      #571 umbrella → #51 ✓ → #572 ✓ → #597 ✓ → #573 open → #574 skip (backlog)
+      Next up: /work-issue 573, then close #571
+
+  G2  Key ranges (proposed)                 Improvement · not started · effort S
+      #251 open → #255 open → #256 open → #257 open → #258 open → #260 open → #262 open
+      Theme: key ranges in [keymap] report faults badly and bind keys that cannot be pressed.
+      Next up: /fix-order goal "Key ranges" 251 255 256 257 258 260 262, then /work-issue 251
+  ```
+
+  Add one line under the chain only when it says something the chain does not: the theme of a proposed goal, a dependency on another goal, a decision that blocks the goal.
+* **Ready to close** — each goal from Phase 4.7 step 8, with the members that stay in the backlog. State that nothing has been closed. Omit when empty.
+* **Code health** — the `Maintainer-only` issues in no goal, grouped by `category:` label, each group in Phase 4 order: one line per issue with its number, title and order. This is the list for a day of clean-up work. Omit when empty.
+
+Then the appendix:
 
 * **Work plan** — one row per unit, in order:
 
@@ -412,6 +533,40 @@ Then the body:
 * **Relationship graph** — the Phase 2 edges with their evidence. Skip pairs with no edge; don't pad.
 * **Open questions** — edges you couldn't classify confidently, ambiguous dependencies, anything needing maintainer judgment.
 
+## The `goal` subcommand
+
+`/fix-order goal "<name>" <n> <n>...` makes a parent issue named `<name>` and adds each `<n>` to it as a GitHub sub-issue. Then the issues are one feature goal in every later run. Use it to make a proposed goal real, or to group unrelated issues that you want to do together (for example five documentation fixes). `/make-issues` runs the same steps for the issues that one session files for one feature.
+
+1. **Read the issues.** For each `<n>`: `gh issue view <n> --json number,title,body,state,labels`, and its database id and parent:
+
+   ```bash
+   gh api graphql -F owner=<owner> -F name=<repo> -F n=<n> -f query='
+     query($owner:String!,$name:String!,$n:Int!){
+       repository(owner:$owner,name:$name){issue(number:$n){id databaseId parent{number title}}}}'
+   ```
+
+   An issue that does not exist stops the command. A closed issue is allowed (it shows as `✓`).
+2. **Name.** With no `<name>`, propose a short name from the shared theme of the issues, and show it in step 4 as a value that the user can change.
+3. **Draft the parent issue.**
+   - Title: `<name>`.
+   - Body, in the shape from `~/.claude/skills/issue-triage/SKILL.md` ("Summary format"): a `**SUMMARY:**` of what the user gets when all the issues are done, an `**IMPACT:**` line with the highest tier of the members' `**IMPACT:**` lines (`unknown` members do not count; if none is known, assess it as `/issue-triage` does), then `---`, then one line that says this is a goal issue, a list of the members (`- #<n> <title>`), and the marker:
+
+     ```html
+     <!-- fix-order-goal
+     name: <name>
+     -->
+     ```
+   - No labels, no fingerprint. A parent is never a work unit, so it needs neither.
+4. **Find parent conflicts.** GitHub lets an issue have only one parent. List each `<n>` that already has a parent other than the new one, with that parent's number and title.
+5. **Show and confirm.** Show the title, the body, the member list, and the conflicts. For each conflict, ask: **move** it to the new goal, or **leave it out**. Ask before any write, even when there is no conflict. With no answer for a conflict, leave it out.
+6. **Apply.**
+   - `gh issue create --title "<name>" --body-file <file>`. Read the new issue's number and node id.
+   - For each member: `gh api graphql -f query='mutation{addSubIssue(input:{issueId:"<parent node id>",subIssueId:"<member node id>"<, replaceParent:true for a confirmed move>}){issue{number}}}'`.
+   - Leave each conflict that the user did not move as it is.
+7. **Report** the new issue's URL, the members added, the members moved (from which parent), and the members left out.
+
+Never close, relabel, or edit a member. Never move an issue to a new parent without the user's answer in step 5.
+
 ## The `label` subcommand
 
 Puts `status: needs-decision` on the issues this queue is blocked on, so they're filterable in the GitHub UI instead of only visible in a snapshot under `.claude/tmp/`. It is a **sync**, not an apply — it removes the label as readily as it adds it, because a label left behind after a decision was answered is worse than no label at all.
@@ -432,7 +587,13 @@ This label is for humans reading GitHub. Nothing in this ecosystem reads it back
 
 ## Next in the pipeline
 
-This skill is stage 3 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line. Which line depends on what the dispositions found, in this order:
+This skill is stage 3 of the review → issue → PR → merge pipeline (`~/.claude/skills/WORKFLOW.md`). End the run by printing the next step as the last line. On a full or scoped run (not a `/work-issue` batch), the next step is the user's choice of goal:
+
+> Next: pick a goal. G1 (Large file handling) is first: `/work-issue 573`, then close #571.
+
+Name the first goal and its "Next up". When a decision blocks G1, the decision is the next step. When goals are ready to close, add one line that names them.
+
+When the run has no goals (a batch run, or an empty queue), use these lines, in this order:
 
 1. **Any `NEEDS-DECISION`** — that's the next step, not `/work-issue`. Name the issue numbers and say a batch run will halt on them anyway:
 
@@ -454,7 +615,10 @@ This skill never runs the next step itself; it prints the command and stops.
 
 ## Rules
 
-* Never create, close, comment on, or edit an issue. Never edit an issue body. Never create a branch, worktree, or PR. Apart from the `label` subcommand, this skill only reads and writes under `.claude/tmp/fix-order/`.
+* Never create, close, comment on, or edit an issue. Never edit an issue body. Never create a branch, worktree, or PR. Apart from the `label` and `goal` subcommands, this skill only reads and writes under `.claude/tmp/fix-order/`.
+* `goal` may create one parent issue and add sub-issue links to it, only after showing the draft and getting confirmation. It moves an issue from another parent only when the user says so for that issue.
+* Never rank a parent as a work unit. It is closed when its goal is done.
+* Never put an issue in two goals, and never guess an impact tier. An unknown tier is shown as `unknown`.
 * `label` may add and remove exactly one label, `status: needs-decision`, only within the resolved snapshot's scope, and only after showing both lists and getting confirmation. Never touch any other label — `backlog` and every other deferral label stay the user's to apply.
 * Never run the ranking as a side effect of `label`. A missing snapshot is a stop-and-report, not a prompt to generate one.
 * `clean` and `clean --all` are the only operations that delete anything; both require showing candidates and getting explicit confirmation.
@@ -473,6 +637,8 @@ This skill never runs the next step itself; it prints the command and stops.
 ## Repeat-run mode
 
 If a file matching the current scope already exists, read it first. Mark issues no longer open as `CLOSED`, re-rank the remainder, and note which dispositions changed since the last run and why (usually: an issue was fixed, a decision was made, or a label changed).
+
+Goals are formed fresh on every run (Phase 4.7 is cheap). Name a goal the same as in the last run when its parent or its members did not change, so the user can follow it between runs.
 
 **Full-queue repeat runs** always re-run Phase 1 in full — a high-severity issue filed since the last run must not stay invisible. For an issue already in `units` whose live `updatedAt` is not later than the file's `generated` timestamp, reuse its recorded fingerprint data, edges, and disposition verbatim rather than recomputing. One exception: if a newly-processed issue's Phase 2 analysis produces an edge touching a skipped issue, that edge is new information — update the skipped issue's entry, and re-check whether its disposition should change (a new `COLLIDES` edge can turn a `WORK` into a `GROUP`).
 
@@ -506,9 +672,12 @@ Requires the `gh` CLI, authenticated (`gh auth status`) with read access to the 
 /fix-order open             # open the snapshot folder (macOS)
 /fix-order clean [--all]    # tidy up old snapshots
 /fix-order label [#11 #15]  # sync `status: needs-decision` onto GitHub
+/fix-order goal "Docs fixes" 331 358 485   # group issues into one goal (makes a parent issue)
 ```
 
-`label` is the only one that writes to GitHub. It reads the newest snapshot for the given scope and makes GitHub agree with it — adding the label to issues currently dispositioned `NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are. Run it after `/fix-order` to make the blocked issues visible in the UI, and again after answering a decision to clear the flag.
+`label` and `goal` are the only ones that write to GitHub. `goal` shows the parent issue it will make, and any issue that already has a parent, and asks first.
+
+`label` It reads the newest snapshot for the given scope and makes GitHub agree with it — adding the label to issues currently dispositioned `NEEDS-DECISION`, removing it from issues in that same snapshot that no longer are. Run it after `/fix-order` to make the blocked issues visible in the UI, and again after answering a decision to clear the flag.
 
 Output goes to `.claude/tmp/fix-order/FIX_ORDER.md`, the shared per-skill scratch convention. It persists between sessions so repeat runs can report what changed, and never enters version control.
 
@@ -519,6 +688,16 @@ echo '**/.claude/tmp/' >> "$(git config --global core.excludesFile)"
 ```
 
 Without it, the skill falls back to appending to `.git/info/exclude` on first run in a repo — never to the tracked `.gitignore`, which would create a commit diff you'd have to carry. That fallback is per-repo and invisible in `git status`, which is the point, but it's also an obscure corner of git: if you ever find a file that refuses to show up in `git status` with nothing in either `.gitignore` to explain it, `git check-ignore -v <path>` names the exact file and line responsible.
+
+## Why goals
+
+A ranked list of every open issue assumes that you want to fix all of them, and orders them by engineering cost. That is not how the work goes. You start a feature, brainstorm, file some tickets, do some of them, and move on. The remainders stay in the list and hide the next useful thing.
+
+A goal is the unit you actually choose: "finish the large-file feature", "fix the key-range problems". The goal list is short, each item tells you why it matters (its impact tier) and what to type next, and an old feature that has only backlog work left shows up as "ready to close" instead of as noise. A started goal ranks above a new one at the same tier, so remainders get finished.
+
+The impact tier comes from the `**IMPACT:**` line that `/issue-triage` writes, not from `severity:`. Severity measures how bad a fault is; the tier measures what you gain — a flashy feature, a nice improvement, a fix to a thing that annoys you, a workflow shortcut.
+
+Features are found from GitHub sub-issues only, so a goal stays the same between runs. Clusters found from issue text are shown as `proposed`, with the `/fix-order goal` command that makes them real.
 
 ## Why a disposition per issue instead of a ranked list
 
@@ -557,8 +736,8 @@ The reason it's a separate subcommand rather than a step at the end of a fix-ord
 The intended loop:
 
 1. `/project-review` or `/code-review` — find the work
-2. `/make-issues` — file it; `/issue-triage` — complete every issue (summary, labels, fingerprint)
-3. `/fix-order` — decide what to work, in what order, what to combine, what to drop
+2. `/make-issues` — file it (with a parent issue when one session files several issues for one feature); `/issue-triage` — complete every issue (summary, impact tier, labels, fingerprint)
+3. `/fix-order` — pick a goal; under it, what to work, in what order, what to combine, what to drop
 4. `/work-issue all` — execute the plan (it runs this skill's Phases 1.5–5, including Phase 4.5, as a sub-protocol to order its queue)
 5. `/merge-order` — this skill's PR order, plus what you need while merging (ready, blocked, rebase likely, next action)
 6. Merge manually in the recommended order
@@ -596,6 +775,8 @@ Phase 4.6 makes the same split for PR pairs, for the same reason.
 - Dependencies that nobody wrote down and that aren't visible in the code are invisible here. Declared dependencies are only as good as the issue text.
 - File overlap between PRs is necessary but not sufficient. Two PRs can change different files and still conflict in behavior (one renames a function the other calls). That shows up only when the code runs, so run the tests after every merge.
 - Severity ordering depends on the repo having severity labels. On a repo without them, ordering falls back to dependency, blast radius, and effort, which is weaker. `/issue-triage` adds the labels.
+- A proposed bug-cluster goal is a judgment call over issue text. Two runs can propose different clusters; make a cluster real with `/fix-order goal` to fix it.
+- The goal ranking depends on `**IMPACT:**` lines. Issues without one rank as `unknown`, last. Run `/issue-triage` to add them.
 - Blast radius counts files, not symbols. Two changes in the same large file count as an overlap even when they would merge cleanly.
 
 ## License

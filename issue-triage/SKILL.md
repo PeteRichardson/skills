@@ -1,7 +1,7 @@
 ---
 name: issue-triage
 argument-hint: "[#n ...] [--verify] [--reverify #n ...]"
-description: Make GitHub issues complete, whoever filed them. Adds what is missing and nothing else — a summary at the top, severity/category/effort labels in empty namespaces, and the dedup fingerprint — after one confirmation table. With --verify, reproduces each issue once and records the steps in the issue. Owns the label vocabulary, the category rules, the summary format and the fingerprint format that /make-issues also uses. Use when the user files an issue by hand, asks to "triage", "label", "summarize" or "fill in" issues, or when /make-issues has just filed issues. For deciding what to fix first, use /fix-order instead.
+description: Make GitHub issues complete, whoever filed them. Adds what is missing and nothing else — a summary and an impact tier at the top, severity/category/effort labels in empty namespaces, and the dedup fingerprint — after one confirmation table. With --verify, reproduces each issue once and records the steps in the issue. Owns the label vocabulary, the category rules, the summary format, the impact tiers and the fingerprint format that /make-issues and /fix-order also use. Use when the user files an issue by hand, asks to "triage", "label", "summarize" or "fill in" issues, or when /make-issues has just filed issues. For deciding what to fix first, use /fix-order instead.
 disable-model-invocation: false
 ---
 
@@ -9,7 +9,7 @@ disable-model-invocation: false
 
 The gate that every issue passes through. An issue can come from `/make-issues`, from Matt
 Pocock's `/to-spec` or `/to-tickets`, or from a person. After this skill, each one has the
-same things: a summary, labels, and a fingerprint. Then `/fix-order` can rank all of them
+same things: a summary, an impact tier, labels, and a fingerprint. Then `/fix-order` can rank all of them
 with no review report in hand.
 
 When invoked via `/issue-triage`, follow the protocol below. Everything from here through the
@@ -24,7 +24,8 @@ this skill's own repo, not the repo under review.
 ## Operating principles
 
 **Fill gaps, never rewrite.** Every pass adds only what is missing. A label goes only into an
-empty namespace. A summary goes only onto a body that has none. A fingerprint goes only onto an
+empty namespace. A summary goes only onto a body that has none. An impact line goes only into a summary block
+that has none. A fingerprint goes only onto an
 issue that has none. A person's work on an issue stays exactly as it is.
 
 **Nothing is applied before the user confirms.** All proposals go into one table. The user may
@@ -48,8 +49,9 @@ a value, leave it empty and show `—`.
 
 ## The vocabulary
 
-This file owns the label vocabulary, the category rules, the summary format and the
-fingerprint format. `/make-issues` uses them from here; it does not keep a copy.
+This file owns the label vocabulary, the category rules, the summary format, the impact tiers
+and the fingerprint format. `/make-issues` and `/fix-order` use them from here; they do not keep
+a copy.
 
 ### Labels
 
@@ -125,6 +127,8 @@ At the very top of the body. **This section is canonical for the format.** Each 
 
 ```markdown
 > **SUMMARY:** One or two sentences about the effect on the user.
+>
+> **IMPACT:** <tier>. <one sentence: why this tier>
 
 ---
 ```
@@ -133,6 +137,31 @@ In ASD-STE100 Simplified Technical English. The one or two most important user i
 enhancement gets the advantage to the user. No file names, no function names, no detail of the
 solution. If the issue changes nothing that the user can see, say so, then give the effect on
 the developer who reads or changes the code.
+
+The `**IMPACT:**` line is in the same blockquote, after the summary. It starts with one tier word
+from "Impact tiers", then a full stop, then one sentence that gives the reason. The reason is the
+only place that records a cause the text cannot show, for example "You said that this breaks
+your flow when you edit filters."
+
+### Impact tiers
+
+**Impact tier** — how much the user gains when the issue is fixed. It is a different axis from
+`severity:`. `/fix-order` ranks goals by it. Six tiers, highest first:
+
+| Tier | Meaning |
+|---|---|
+| `Breakage` | The program crashes, loses data, or shows the user a wrong result. |
+| `Headline` | A large new feature that the user sees at once. |
+| `Improvement` | A clear gain to a feature that exists. |
+| `Irritant` | A small fix to a problem that the maintainer said annoys them. |
+| `Shortcut` | Syntactic sugar that makes one workflow faster. |
+| `Maintainer-only` | No effect that the user can see. Only the person who reads or changes the code gains. |
+
+The tier set is **closed**. Never mint a new tier.
+
+`Irritant` needs evidence that the maintainer finds the problem annoying: their words in the
+issue, in a comment, or in the session that filed it. Without that evidence, propose
+`Improvement` or `Shortcut`. The user can change the tier in the confirmation table.
 
 ### Fingerprint format
 
@@ -169,6 +198,7 @@ keywords: <comma-separated>
   A body that opens with a `## Summary` **section** and has no marker has *prose but no
   marker*: report it as `summary: prose, marker missing` and take it to Phase 4 for
   conversion. Never stack a second summary block above it,
+- impact: present if the body contains `**IMPACT:**`,
 - verification: present if any comment contains `<!-- issue-verification`.
 
 An issue that has everything is done. List it once as complete and skip it.
@@ -221,11 +251,16 @@ A summary is **added, never rewritten**: a person may have curated an existing o
    replace that heading line with the marker block and keep every byte of prose below it:
    the heading goes, the words stay. A draft that repeats that prose as a second summary is
    wrong. Where there is no such section, the marker block is prepended.
+4. **Impact.** Scope: every issue with no `**IMPACT:**` in the body. Assess the tier per "Impact
+   tiers" from the title, body and comments, then write the reason. A new summary block gets the
+   line in its draft. On a summary block that exists, the line is **inserted**: a `>` line and the
+   `> **IMPACT:**` line go after the last line of the blockquote that holds `**SUMMARY:**`. No
+   other byte changes.
 
 ## Confirm and apply
 
 1. **Show one table** — issue number, title, proposed fingerprint (file + category), proposed
-   labels with a short reason, proposed summary. Ask for confirmation. Apply nothing before the
+   labels with a short reason, proposed summary, proposed impact tier with its reason. Ask for confirmation. Apply nothing before the
    answer.
 2. **Fingerprints** — `gh issue comment <n> --body-file <file>`.
 3. **Labels** — seed per "Labels", then `gh issue edit <n> --add-label ...`.
@@ -235,6 +270,10 @@ A summary is **added, never rewritten**: a person may have curated an existing o
    the only change to the fetched body is its `## Summary` heading line replaced by the marker
    block and a `---`; every other byte is the fetched body. Both go through
    `gh issue edit <n> --body-file <file>`, so no shell quoting touches it.
+5. **Impact lines** — where the summary was written in step 4, the line is already in it.
+   Otherwise fetch the body again just before the write. If it changed since the draft, or it now
+   contains `**IMPACT:**`, skip that issue and say so. Otherwise insert the line per Phase 4
+   step 4 and write with `gh issue edit <n> --body-file <file>`.
 
 ## Phase 5: Verify (only with `--verify` or `--reverify`)
 
@@ -282,6 +321,7 @@ repo's own, so his updates never conflict with it.
 - **Disagreements** — the Phase 3 step 2 lines, or "none".
 - Summaries added, summaries converted from a `## Summary` heading, and issues skipped because
   their body changed.
+- Impact lines added, with the count per tier.
 - With `--verify`: each issue and its result.
 
 ## Next in the pipeline
@@ -301,9 +341,11 @@ Vary it only for these cases:
 
 ## Rules
 
-- Never edit an issue body, except to prepend a confirmed summary to a body that has none, or
-  to convert a confirmed leading `## Summary` heading into the marker (Phase 4 step 3: the
-  heading goes, every other byte stays as it was).
+- Never edit an issue body, except to prepend a confirmed summary to a body that has none, to
+  convert a confirmed leading `## Summary` heading into the marker (Phase 4 step 3: the
+  heading goes, every other byte stays as it was), or to insert a confirmed `**IMPACT:**` line
+  into a summary block that has none (Phase 4 step 4).
+- Never change an `**IMPACT:**` line that exists. A person may have set the tier.
 - Never remove or change a label. Add only into an empty namespace, only after the user confirms.
 - Never apply `status:` or any label of Matt Pocock's skills (`ready-for-agent`, `needs-triage`,
   `bug`, `enhancement`, …).
@@ -333,6 +375,14 @@ Everything below is for humans. It is not part of the protocol above.
 to rank?". The old `/issue-triage` did the first job, and the second was hidden in
 `/make-issues backfill`. A hand-filed issue then needed a skill named for filing review findings.
 Now each job has one skill, with a name that says what it does.
+
+## Why impact is a line in the summary, not a label
+
+`/fix-order` ranks goals by user impact. `severity:` is not that: a Low-severity tweak that
+annoys you every day can matter more than a Medium refactor that nobody sees. The tier needs a
+reason with it, because the reason ("you said this annoys you") is the one thing a later run
+cannot find again from the code. A label holds no reason, so the tier and the reason go into the
+summary block, next to the user effect they describe.
 
 ## Why verification is opt-in
 
