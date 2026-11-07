@@ -116,7 +116,7 @@ skill in change mode.
 `/code-review` runs one **engine** and always writes the same report format:
 `open-code-review-delegate` (`ocr`, the default for a PR or a change), its own protocol
 (`native`, the default for a scope — `ocr` reviews only diffs), or
-`mattpocock-skills:code-review` (`matt`, its Standards + Spec check, with an **Axis:** line on
+Matt Pocock's code-review (`matt`, its Standards + Spec check, with an **Axis:** line on
 each finding). Choose with `--engine`.
 
 Run `/code-review` first if you want the detail to feed the audit — `/project-review`'s
@@ -401,16 +401,19 @@ is a convenience, not a commitment.
 
 ## Where Matt Pocock's skills fit
 
-Matt Pocock's skills are installed beside these (`npx skills`, and the `mattpocock-skills:`
-plugin). **No skill here edits his, copies his text, or depends on his wording.** He updates
-them often, and an update must need no follow-up edit here. They fit at these points:
+Matt Pocock's skills are installed beside these (`npx skills`, into `~/.agents/skills`).
+**No skill here edits his, copies his text, or depends on his wording.** He updates
+them often, and an update must need no follow-up edit here. The one exception is his
+`code-review`: it has the same name as this repo's, and Hermes and Pi load neither of two skills
+with one name. So it is not installed; `code-review/engines/matt-code-review.md` is a vendored
+copy, refreshed by hand. They fit at these points:
 
 | His skill | Where | How it joins |
 |---|---|---|
 | `/grill-with-docs`, `/to-spec`, `/to-tickets` | Stage 1–2, from an idea | Their issues go through `/issue-triage` like any other. It leaves `ready-for-agent` alone |
 | `/implement-spec` | Stage 4, one big spec | One integration branch instead of `/work-issue`'s one PR per unit |
 | `/implement` | Inside a branch | Small work on the current branch. It calls `/code-review` by name, which runs this repo's skill in change mode |
-| `mattpocock-skills:code-review` | Stage 1 or 6 | An engine of `/code-review` (`--engine matt`): its Standards + Spec check, in this repo's report format |
+| His `code-review` (vendored) | Stage 1 or 6 | An engine of `/code-review` (`--engine matt`): its Standards + Spec check, in this repo's report format |
 | `/triage` | Off the main path | Type `/triage #n` by hand for its full one-issue treatment (questions, grilling, an agent brief). Not the same job as `/issue-triage`, which only completes issues |
 
 `/to-spec` and `/to-tickets` need `docs/agents/triage-labels.md` in each repo; keep it.

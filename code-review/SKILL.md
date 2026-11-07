@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Comprehensive code review of a repository scope, a GitHub pull request, or the changes on the current branch. Runs one review engine — open-code-review-delegate (default for changes and PRs), this skill's own protocol (default for a scope), or mattpocock-skills:code-review — and always writes one report format that /make-issues can file. Analyzes code across HIGH (security, memory, crashes), IDIOM (language best practices), MEDIUM (inefficiencies), and LOW (style) categories. Issues ranked by importance; all HIGH shown plus top IDIOM+MEDIUM up to 10 total. Reports saved as markdown snapshots in docs/reviews/ (not committed). Use when you want to review a folder/file, pick one issue at a time, and work through them incrementally across multiple sessions. Also use when the user types /code-review 68, /code-review #68, or /code-review PR68, says "review PR 68", "review this pull request", "code review the PR before I merge it", or passes a GitHub pull request URL. Also use when /code-review is typed with no argument, or another skill (such as /implement or /implement-spec) says to review the work on the current branch, or the user says "review my changes" or "review since main".
+description: Comprehensive code review of a repository scope, a GitHub pull request, or the changes on the current branch. Runs one review engine — open-code-review-delegate (default for changes and PRs), this skill's own protocol (default for a scope), or Matt Pocock's code-review (vendored) — and always writes one report format that /make-issues can file. Analyzes code across HIGH (security, memory, crashes), IDIOM (language best practices), MEDIUM (inefficiencies), and LOW (style) categories. Issues ranked by importance; all HIGH shown plus top IDIOM+MEDIUM up to 10 total. Reports saved as markdown snapshots in docs/reviews/ (not committed). Use when you want to review a folder/file, pick one issue at a time, and work through them incrementally across multiple sessions. Also use when the user types /code-review 68, /code-review #68, or /code-review PR68, says "review PR 68", "review this pull request", "code review the PR before I merge it", or passes a GitHub pull request URL. Also use when /code-review is typed with no argument, or another skill (such as /implement or /implement-spec) says to review the work on the current branch, or the user says "review my changes" or "review since main".
 ---
 
 # Comprehensive Code Review
@@ -158,7 +158,7 @@ That section is a pointer, not a work queue: `/make-issues` deliberately skips i
 
 An engine finds the issues. This skill does everything else: it resolves the target, picks the engine, converts the engine's findings into one list, tiers and scores that list, and writes the report. So the report format, the tiers, and the reporting rule are the same for every engine, and `/make-issues` reads every report the same way.
 
-Never edit an engine's own skill file. The `ocr` and `matt` engines are other authors' skills; they update on their own, and this skill reads or calls them as they are.
+Never edit an engine's own skill file. The `ocr` and `matt` engines are other authors' skills, and this skill reads them as they are. `ocr` updates on its own; `matt` is a vendored copy that changes only when its upstream is copied in again (see its header comment).
 
 ### Which engine runs
 
@@ -187,9 +187,9 @@ Read `~/.claude/skills/open-code-review-delegate/SKILL.md` and run its **Steps 1
 
 Its output is a list of comments: `path`, `content`, `start_line`, `end_line`, `category`, `severity`. Its preview also lists `excluded_files` with a reason (for example `unsupported_ext` for Markdown). Every excluded file goes into the report's skipped-files list, with its reason, so the reader knows it was not reviewed. Its coverage numbers (`total_files`, `reviewed_files`, `skipped_files`) go into the Summary.
 
-### `matt` — mattpocock-skills:code-review
+### `matt` — Matt Pocock's code-review
 
-Call it with the Skill tool (`mattpocock-skills:code-review`) and give it the fixed point as its argument: the merge base for a branch change, or the `--since` ref. It reviews `<fixed point>...HEAD`, so it needs the code checked out:
+Read `engines/matt-code-review.md` in this skill's folder and run its **Process**, steps 1–5, with the fixed point already pinned: the merge base for a branch change, or the `--since` ref. Its step 5 output is this engine's output. It is a vendored copy, not an installed skill, so there is no `/code-review` name clash with this skill in any agent. It reviews `<fixed point>...HEAD`, so it needs the code checked out:
 
 - **PR target** — it cannot review a PR that is not checked out, and this skill never checks one out. Say so and stop: `gh pr checkout <n>`, then `/code-review --engine matt` on that branch.
 - **Uncommitted change** — its diff does not include uncommitted work. Say so and stop.
