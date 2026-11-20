@@ -26,12 +26,11 @@ Fix-I60-F3-rust-ps-path
 - `F<n>` — the finding ID from a `/project-review` or `/code-review` report, if the issue records one. Omitted entirely when it doesn't — `Fix-I63-rust-shell-quote`, no empty segment.
 - Slug — 2–4 words from the issue title, lowercased, `[a-z0-9-]` only, ≤ 32 chars.
 
-**Grouped units** — when `/fix-order` returns a `GROUP` disposition, several issues share one branch and one PR. Every issue number appears, ascending, each with its own `I` prefix; finding IDs follow in the same order, and are omitted entirely if none of the issues has one:
+**Grouped units** — when `/fix-order` returns a `GROUP` disposition, several issues share one branch and one PR. Every issue number appears, ascending, each with its own `I` prefix; an issue that has a finding ID carries it **immediately after its own `I<n>`**, in the same ascending order, and the `F` segments are omitted entirely if none of the issues has one:
 
 ```
-Fix-I11-I15-sparql-retry-set
-    └──┘└──┘ └─────────────┘
-   both issue numbers   slug describing the combined change
+Fix-I11-I15-sparql-retry-set          # neither issue records a finding
+Fix-I11-F7-I15-F9-sparql-retry-set   # both do: F follows its own I
 ```
 
 The slug describes what the *unit* does, not any one issue's title — a combined branch has no single title to derive from. The PR body carries one `Fixes #<n>` line per issue so GitHub closes all of them on merge. Everything else about the scheme is unchanged.
@@ -201,6 +200,8 @@ Include `Fixes #<n>` in the final commit or the PR body (Phase 5 relies on it fo
 **When Phase 1 found a `confirmed` verification**, its **Steps to reproduce** are the first failing test. Write them as a test, see it fail for the reason the comment gives, then fix. Start reading the code at its **Code path**. If the test does not fail, the code has changed since the verification `sha:` — say so, and ask before going on, rather than writing a fix for a bug you cannot see.
 
 If the issue needs design decisions the issue text doesn't settle, ask before implementing. A wrong fix delivered fast is worse than one round of questions.
+
+An issue whose recommendation offers alternatives ("delete the arm, or redesign the handle") is *not* automatically unsettled: when the issue itself records that the choice is made — a ready-for-agent / fully-specified label, and one alternative that plainly exceeds the recorded effort — the maintainer's decision is on the record. Take the recommendation's leading option and state the choice and the rejected alternative explicitly in the PR body and the resolution comment. Without that record on the issue, it *is* an open decision: ask.
 
 ## Phase 5: Push and open the PR
 
