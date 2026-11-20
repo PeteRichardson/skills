@@ -82,12 +82,20 @@ For each composed candidate, in order:
 4. **No candidates, or top score below ~20%**: create immediately — `gh issue create --title "<title>" --body "<body+marker>" --label "severity: X" --label "category: Y" [--label "effort: Z"] --label "source: <tool>"`. No pause.
 5. **Top score at or above ~20%**: pause. Show the matched issue's title, direct URL, state (open/closed — note explicitly if closed, e.g. "closed as wontfix" vs "closed as fixed", since a rejected duplicate is a different signal than a resolved one), and the overlap score (plus ties). Ask: create anyway, or skip this finding. Move to the next finding either way.
 6. Before the first `gh issue create` call in a run, ensure the target repo has all labels this run will use, per `/issue-triage`'s "Labels" seeding rule — create any missing ones first.
+7. **Record each create in the filing map.** The filing map is the one source of the issue number for each finding: `F3 → #5`. Take the number from the URL that `gh issue create` prints, and add the row as soon as the create returns. Issue numbers and finding IDs drift apart (a skipped finding, a failed create, an issue someone else files during the run), so every issue number comes from the map.
+8. **A create that prints no issue URL has failed.** Before you retry it, search for the candidate's exact title: `gh issue list --state all --search '"<title>" in:title' --json number,title,body`. A hit counts only when its title is exactly this candidate's title **and** its fingerprint has this finding's `finding_id:` (a `/code-review` ordinal such as `3` repeats across reports, so the ID alone can match an older issue). A hit means the create succeeded after all: add that row to the map. No hit: retry that one finding only, once. A finding that still fails is listed as **not filed** in the run summary, with the error.
+
+**Done when** every finding in scope is in the filing map, skipped as a duplicate in step 5, or listed as not filed.
 
 Apply only the labels the **report states**: `severity:`, `category:` (as resolved above), `effort:` when the report has one, and `source:`. They are facts from the report. Leave every other namespace empty; Phase 4 fills it.
 
 ## Phase 4: Complete the filed issues
 
-After the last create, call `/issue-triage` with the numbers of the issues this run created (Skill tool, `issue-triage`, args `#n #m ...`). It adds the summary to each one, fills empty label namespaces (for example `effort:` on a `/code-review` finding, which has no effort), and shows its one confirmation table. No verification: `/issue-triage` verifies only with `--verify`.
+After the last create, call `/issue-triage` with the issue numbers from the filing map (Skill tool, `issue-triage`, args `#n #m ...`). It adds the summary to each one, fills empty label namespaces (for example `effort:` on a `/code-review` finding, which has no effort), and shows its one confirmation table. No verification: `/issue-triage` verifies only with `--verify`.
+
+The call runs **inline**: its protocol loads into this turn, and you execute it. Run its phases, show its confirmation table to the user, and end the turn there. The user's answer starts its apply step, which ends with its own summary check. Every summary comes from that protocol.
+
+After it applies, fetch each issue in the filing map once (`gh issue view <n> --json body`) and confirm that the `finding_id:` in its fingerprint equals the finding that the map row names. **Done when** every row matches or is reported in the run summary as `#n: map says F3, body says F4`. Report a mismatch and leave the issue as it is: the user decides the fix.
 
 Skip this phase when the run created nothing.
 
@@ -116,6 +124,8 @@ Vary it only for these cases:
 - Always run `/issue-triage`'s category resolution steps in order (existing repo labels, then baseline, then mint new) — never skip straight to minting a new category, and never force a bad fit against an existing one just to avoid creating a label.
 - Stop and report rather than guess when: the source path is missing, matches neither known format, or `gh` reports an authentication/API error. No silent retries.
 - `-f`/ordinal values not found in the source doc are reported as skipped; the rest of the run continues.
+- Every issue number this skill writes, passes on or reports comes from the filing map (Phase 3 step 7).
+- A failed create is retried only through Phase 3 step 8: search first, then retry that one finding.
 
 ---
 

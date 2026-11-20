@@ -45,7 +45,8 @@ a value, leave it empty and show `—`.
 - `--verify` — also run Phase 5 on the issues in scope. Off by default.
 - `--reverify #n ...` — run Phase 5 again on those issues, even when they have a marker.
 - Called by `/make-issues` — the scope is the issues that run just filed. The caller passes
-  their numbers. Same protocol, same confirmation table.
+  their numbers. Same protocol, same confirmation table: the caller runs it inline, shows the
+  table to the user, and ends its turn there until the user answers.
 
 ## The vocabulary
 
@@ -246,7 +247,11 @@ A summary is **added, never rewritten**: a person may have curated an existing o
 
 1. Scope: the issues with no `**SUMMARY:**` in the body — including Phase 1's
    `prose, marker missing` ones.
-2. Draft each one per "Summary format", from the title, body and comments.
+2. Draft each one per "Summary format", from the title, body and comments **of that issue**,
+   fetched by its own number. Each draft comes from the one issue it goes into: read the body,
+   then write its summary, one issue at a time. When the body has a `finding_id:`, it names the
+   report row behind this issue, and it is a different number from the issue number. Most
+   hand-filed issues have none, and need none.
 3. **Convert, do not stack.** Where the body already opens with a `## Summary` section,
    replace that heading line with the marker block and keep every byte of prose below it:
    the heading goes, the words stay. A draft that repeats that prose as a second summary is
@@ -274,6 +279,11 @@ A summary is **added, never rewritten**: a person may have curated an existing o
    Otherwise fetch the body again just before the write. If it changed since the draft, or it now
    contains `**IMPACT:**`, skip that issue and say so. Otherwise insert the line per Phase 4
    step 4 and write with `gh issue edit <n> --body-file <file>`.
+6. **Check each written summary.** Fetch each issue that step 4 or 5 wrote, once. Confirm that
+   the body holds exactly one `**SUMMARY:**`, and that the summary describes the problem in that
+   same body's title and description. **Done when** every written issue passes or is in the
+   report as `#n: summary describes <what it describes instead>`. Report a failure and leave
+   the body as it is: the fix goes back to the user, through a new confirmation table.
 
 ## Phase 5: Verify (only with `--verify` or `--reverify`)
 
@@ -321,6 +331,7 @@ repo's own, so his updates never conflict with it.
 - **Disagreements** — the Phase 3 step 2 lines, or "none".
 - Summaries added, summaries converted from a `## Summary` heading, and issues skipped because
   their body changed.
+- Summary check failures from apply step 6, or "none".
 - Impact lines added, with the count per tier.
 - With `--verify`: each issue and its result.
 
