@@ -86,6 +86,8 @@ Show the whole file to the user, then ask with AskUserQuestion: "Use these notes
 
 ## 4. Release
 
+Before the first command, check the README is current: the latest-release badge is enabled (not in a TODO comment) and the status line does not claim the repository has no tagged releases. If the badge is still in a comment, enable it — the badge needs the first tag to exist, which it now does — and stage it; it lands in the release commit. Do not edit anything else in the README.
+
 ```bash
 cargo release version <level> -p "$pkg" --execute --no-confirm
 cargo release hook -p "$pkg" --execute --no-confirm
