@@ -12,6 +12,8 @@ git-cliff gives the list of commits. The notes are written from that list for a 
 
 Each step has a gate. When a gate fails, stop and report what failed and the state the repository is in now. Repair nothing on your own.
 
+Every statement about a pull request (merged, open, in or not in the release) comes from the output of `prs.sh` in this run. Never state it from memory or from an earlier session: a PR that was open then can be merged now.
+
 ## 1. Check
 
 Run `~/.claude/skills/release/preflight.sh` from the repository.
@@ -49,8 +51,12 @@ Show the user, in this order:
 1. `last` → the proposed version.
 2. The reason, counted from the context lines, which list only the commits that go in the notes: for example "1 breaking, 3 features, 7 fixes, 4 left out of the notes". The left-out count is `total` minus the number of context lines.
 3. The commit list: `git cliff --unreleased --tag v<proposed> --strip all 2>/dev/null`.
+4. The pull requests, from `~/.claude/skills/release/prs.sh`, word for word:
+   - `IN` — merged, and in this release. Mark each one whose commits are not in the context lines as "left out of the notes", so that no merged PR goes missing without the user seeing it.
+   - `OPEN` — open against the default branch, so **not** in this release. Put these first under the heading "Not in this release".
+   - `UNKNOWN` — merged after the last tag, but its commit is not in this clone. Stop: run `git fetch origin` and say that the user runs `/release` again.
 
-Ask with AskUserQuestion: the proposed level first, marked "(Recommended)", then the other two of major, minor and patch, then "Cancel". The release starts only from the user's answer. On Cancel, end; nothing has changed.
+Ask with AskUserQuestion: the proposed level first, marked "(Recommended)", then the other two of major, minor and patch, then "Cancel". When there is an `OPEN` PR, the question names each one (number and title) and says that it is not in the release, so that the user can cancel and merge it first. The release starts only from the user's answer. On Cancel, end; nothing has changed.
 
 ## 3. Write the notes
 
@@ -123,4 +129,4 @@ gh release create vX.Y.Z --title vX.Y.Z --notes-file <notes file>
 
 The notes are the new `CHANGELOG.md` entry. `gh` prints the URL of the release.
 
-Gate: `gh release view vX.Y.Z --json url` works. Done when you give the user one line: the version, the release URL, and that `Cargo.toml`, the tag, `CHANGELOG.md` and the GitHub release all show `X.Y.Z`.
+Gate: `gh release view vX.Y.Z --json url` works. Done when you give the user one line: the version, the release URL, and that `Cargo.toml`, the tag, `CHANGELOG.md` and the GitHub release all show `X.Y.Z`. To say which PRs are or are not in the release, run `prs.sh <last> vX.Y.Z` again and quote it.
